@@ -1,0 +1,4 @@
+[package]
+name = "histogram"
+version = "0.1.0"
+authors = ["brayniac <brayniac@gmail.com>"]
