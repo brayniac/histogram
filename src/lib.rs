@@ -10,6 +10,3 @@
 fn it_works() {
 }
 
-fn name(arg: typ) -> ret {
-    // add code here
-}
