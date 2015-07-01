@@ -20,7 +20,8 @@ pub struct Histogram {
     total: u64,
     precision: u32,
     inner_buckets: u64,
-    data: HashMap<u64, HashMap<u64, u64>>,
+    max_value: u64,
+    data: [u64],
 }
 
 struct Bucket {
@@ -30,7 +31,13 @@ struct Bucket {
 
 impl Histogram {
     /// return a new Histogram
-    pub fn new(precision: u32) -> Option<Histogram> {
+    pub fn new(precision: u32, max_value: u64) -> Option<Histogram> {
+        let inner_buckets = 10_u64.pow(precision)
+        let outer_buckets = max_value as f64;
+        outerbuckets = outer_buckets.log2().ceil() as u64;
+
+        let total_buckets = inner_buckets * outer_buckets;
+
         Some(Histogram {
             total: 0,
             data: HashMap::new(),
