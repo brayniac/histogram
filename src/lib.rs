@@ -8,12 +8,17 @@
 	WORK IN PROGRESS
 */
 
+#![feature(test)]
+extern crate test;
+
+
 use std::collections::HashMap;
 
 // TODO(brayniac): u64 is likely overkill
 // TODO(brayniac): add other counters
 pub struct Histogram {
     total: u64,
+    precision: u32,
     inner_buckets: u64,
     data: HashMap<u64, HashMap<u64, u64>>,
 }
@@ -24,19 +29,14 @@ struct Bucket {
 }
 
 impl Histogram {
-    /// return nil or empty Histogram
-    pub fn nil() -> Histogram {
-        Histogram {
+    /// return a new Histogram
+    pub fn new(precision: u32) -> Option<Histogram> {
+        Some(Histogram {
             total: 0,
             data: HashMap::new(),
-            inner_buckets: 10_u64,
-        }
-    }
-
-    /// return a new Histogram
-    pub fn new() -> Option<Histogram> {
-        let histogram = Histogram::nil();
-        Some(histogram)
+            precision: precision,
+            inner_buckets: 10_u64.pow(precision)
+        })
     }
 
     /// increment counters for value's bucket
@@ -71,8 +71,7 @@ impl Histogram {
         }
     }
 
-    fn get_bucket(&mut self, value: u64) -> Result<Bucket, &'static str> {
-
+    fn get_bucket_old(&mut self, value: u64) -> Result<Bucket, &'static str> {
         if value == 0 {
             return Err("value too small");
         }
@@ -82,11 +81,36 @@ impl Histogram {
         // outer bucket is log2(n)
         let outer = v.log2().floor();
 
-        // inner is linearly scaled between 2^(outer) and 2**(outer+1)
+ 
+         // inner is linearly scaled between 2^(outer) and 2**(outer+1)
         let inner = (v / 2.0_f64.powf(outer) - 1.0_f64) * (self.inner_buckets as f64);
-
         Ok(Bucket {
             outer: outer.floor() as u64,
+            inner: inner.ceil() as u64,
+        })
+
+    }
+
+
+
+
+    fn get_bucket(&mut self, value: u64) -> Result<Bucket, &'static str> {
+
+        if value == 0 {
+            return Err("value too small");
+        }
+
+        let v = value as f64;
+
+        let outer = 63 - value.leading_zeros();
+
+        let remaining = (value - 2_u64.pow(outer));
+
+        // inner is linearly scaled between 2^(outer) and 2**(outer+1)
+        let inner = (remaining as f64 / 2_u64.pow(outer) as f64) * (self.inner_buckets as f64);
+
+        Ok(Bucket {
+            outer: outer as u64,
             inner: inner.ceil() as u64,
         })
     }
@@ -95,28 +119,22 @@ impl Histogram {
 #[cfg(test)]
 mod tests {
     use super::{Histogram};
+    use test::Bencher;
 
     #[test]
     fn it_works() {
     }
 
     #[test]
-    fn test_nil() {
-        let nil = Histogram::nil();
-
-        assert!(nil.total == 0);
-    }
-
-    #[test]
     fn test_new() {
-        let histogram = Histogram::new().unwrap();
+        let histogram = Histogram::new(1).unwrap();
 
         assert!(histogram.total == 0);
     }
 
     #[test]
     fn test_increment() {
-        let mut histogram = Histogram::new().unwrap();
+        let mut histogram = Histogram::new(1).unwrap();
 
         histogram.increment(0);
         assert!(histogram.total == 1);
@@ -126,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_get() {
-        let mut histogram = Histogram::new().unwrap();
+        let mut histogram = Histogram::new(1).unwrap();
 
         histogram.increment(1);
         assert!(histogram.get(1) == 1);
@@ -142,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_get_bucket() {
-        let mut histogram = Histogram::new().unwrap();
+        let mut histogram = Histogram::new(1).unwrap();
 
         match histogram.get_bucket(0) {
             Ok(_) => assert!(false, "value 0 shouldn't have a Bucket"),
@@ -172,5 +190,91 @@ mod tests {
         let bucket = histogram.get_bucket(1025).unwrap();
         assert_eq!(bucket.outer, 10);
         assert_eq!(bucket.inner, 1);
+    }
+
+    
+
+    #[bench]
+    fn bench_get_bucket(b: &mut Bencher) {
+        let mut histogram = Histogram::new(1).unwrap();
+
+        histogram.increment(1);
+
+        b.iter(|| {
+            histogram.get_bucket(1)
+        })
+
+    }
+
+    #[bench]
+    fn bench_get_bucket_max(b: &mut Bencher) {
+        let mut histogram = Histogram::new(10).unwrap();
+
+        histogram.increment(3600000000);
+
+        b.iter(|| {
+            histogram.get_bucket(3600000000)
+        })
+
+    }
+
+    #[bench]
+    fn bench_get_bucket_old(b: &mut Bencher) {
+        let mut histogram = Histogram::new(10).unwrap();
+
+        histogram.increment(1);
+
+        b.iter(|| {
+            histogram.get_bucket_old(1)
+        })
+
+    }
+
+    #[bench]
+    fn bench_get_bucket_old_max(b: &mut Bencher) {
+        let mut histogram = Histogram::new(10).unwrap();
+
+        histogram.increment(3600000000);
+
+        b.iter(|| {
+            histogram.get_bucket_old(3600000000)
+        })
+
+    }
+
+    #[bench]
+    fn bench_get(b: &mut Bencher) {
+        let mut histogram = Histogram::new(1).unwrap();
+
+        histogram.increment(1);
+
+        b.iter(|| {
+            histogram.get(1)
+        })
+
+    }
+
+    #[bench]
+    fn bench_increment(b: &mut Bencher) {
+        let mut histogram = Histogram::new(1).unwrap();
+
+        histogram.increment(1);
+
+        b.iter(|| {
+            histogram.increment(1)
+        })
+
+    }
+
+    #[bench]
+    fn bench_incremen_max(b: &mut Bencher) {
+        let mut histogram = Histogram::new(1).unwrap();
+
+        histogram.increment(3600000000);
+
+        b.iter(|| {
+            histogram.increment(3600000000)
+        })
+
     }
 }
