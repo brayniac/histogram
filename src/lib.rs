@@ -60,31 +60,19 @@ impl Histogram {
         self.data[index]
     }
 
-    pub fn get_index_a(&mut self, value: u64) -> usize {
-        let v = value as f64;
-        let outer = v.log2().floor();
-
-        let inner = (v / 2.0_f64.powf(outer) - 1.0_f64) * (self.inner_buckets as f64);
-
-        let outer = outer as u64;
-        let inner = inner.ceil() as u64;
-        let index = outer * self.inner_buckets + inner;
-        index as usize
-    }
-
     pub fn get_index(&mut self, value: u64) -> usize {
 
         let mut index = 0;
 
         if value >= 1 {
             let outer = 63 - value.leading_zeros();
-            let inner = (value as f64 / 2.0_f64.powi(outer as i32) - 1.0_f64) * (self.inner_buckets as f64);
+            let inner = (value as f64 / 2.0_f64.powi(outer as i32) - 1.0_f64) *
+                        (self.inner_buckets as f64);
 
             let outer = outer as u64;
             let inner = inner.ceil() as u64;
             index = (outer * self.inner_buckets) + inner + 1;
         }
-        
 
         index as usize
     }
@@ -136,18 +124,12 @@ mod tests {
     fn test_get_index() {
         let mut histogram = Histogram::new(3).unwrap();
 
-        // subtract 1, 
-        // find % 10^precision
-
-        assert_eq!(histogram.get_index(1), 1); // 2^0 = 1
-
-        assert_eq!(histogram.get_index(2), 1001); // 2^1 = 2
-        assert_eq!(histogram.get_index(3), 1501); // 2^1 + .5 *2 = 3
-
-        assert_eq!(histogram.get_index(1023), 10000); //=1024 + 0 * 1024
-        assert_eq!(histogram.get_index(1024), 10001); //= " "
-        assert_eq!(histogram.get_index(1025), 10002); //= 1024 + .1 * 1024 = 11 
-
+        assert_eq!(histogram.get_index(1), 1);
+        assert_eq!(histogram.get_index(2), 1001);
+        assert_eq!(histogram.get_index(3), 1501);
+        assert_eq!(histogram.get_index(1023), 10000);
+        assert_eq!(histogram.get_index(1024), 10001);
+        assert_eq!(histogram.get_index(1025), 10002);
     }
 
     #[bench]
@@ -159,7 +141,6 @@ mod tests {
         b.iter(|| {
             histogram.get(1)
         })
-
     }
 
     #[bench]
@@ -171,7 +152,6 @@ mod tests {
         b.iter(|| {
             histogram.get(3600000000)
         })
-
     }
 
     #[bench]
@@ -183,7 +163,6 @@ mod tests {
         b.iter(|| {
             histogram.increment(1)
         })
-
     }
 
     #[bench]
@@ -195,7 +174,6 @@ mod tests {
         b.iter(|| {
             histogram.increment(3600000000)
         })
-
     }
 
     #[bench]
@@ -214,5 +192,5 @@ mod tests {
         b.iter(|| {
             histogram.get_index(3600000000);
         })
-    }    
+    }
 }
