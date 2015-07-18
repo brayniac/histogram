@@ -8,7 +8,7 @@ license = "MIT"
 description = "histogram storage and percentile metrics with precision guarentees"
 
 homepage = "https://github.com/brayniac/histogram"
-documentation = ""
+documentation = "http://brayniac.github.io/histogram"
 repository = "https://github.com/brayniac/histogram"
 
 readme = "README.md"
