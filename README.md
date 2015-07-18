@@ -6,8 +6,6 @@ throughout the range of stored values.
 
 [![Build Status](https://travis-ci.org/brayniac/histogram.svg?branch=master)](https://travis-ci.org/brayniac/histogram)
 
-- API documentation: [master](http://rustdoc.s3-website-us-east-1.amazonaws.com/mio/master/mio/), [v0.3](http://rustdoc.s3-website-us-east-1.amazonaws.com/mio/v0.3.x/mio/)
-
 ## Usage
 
 To use `histogram`, first add this to your `Cargo.toml`:
