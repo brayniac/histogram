@@ -69,6 +69,7 @@ pub struct HistogramCounters {
 pub struct HistogramData {
     data: Vec<u64>,
     counters: HistogramCounters,
+    iterator: usize,
 }
 
 #[allow(dead_code)]
@@ -77,14 +78,41 @@ pub struct HistogramProperties {
     buckets_outer: u32,
     buckets_total: u32,
     memory_used: u32,
-    direct_index_max: u64,
-    direct_index_power: u32,
+    linear_max: u64,
+    linear_power: u32,
 }
 
 pub struct Histogram {
     config: HistogramConfig,
     data: HistogramData,
     properties: HistogramProperties,
+}
+
+pub struct HistogramBucket {
+    pub value: u64,
+    pub count: u64,
+    pub id: u64,
+}
+
+impl Iterator for Histogram {
+    type Item = HistogramBucket;
+
+    fn next(&mut self) -> Option<HistogramBucket> {
+        let current = self.data.iterator;
+        self.data.iterator += 1;
+
+        if current == (self.properties.buckets_total as usize) {
+            self.data.iterator = 0;
+            None
+        } else {
+            //println!("Iterating: current: {}", current);
+            Some(HistogramBucket {
+                id: current as u64,
+                value: self.index_value(current),
+                count: self.data.data[current],
+            })
+        }
+    }
 }
 
 impl Histogram {
@@ -105,21 +133,21 @@ impl Histogram {
 
         let radix = 10_u32;
 
-        let buckets_inner = radix.pow(config.precision);
+        let buckets_inner: u32 = radix.pow(config.precision);
 
-        // we can directly index any value less than the number of inner buckets
-        let direct_index_power = 31 - buckets_inner.leading_zeros();
-        let direct_index_max = 2_u64.pow(direct_index_power);
+        let linear_power: u32 = 32 - buckets_inner.leading_zeros();
 
-        let shift = config.max_value.leading_zeros() + direct_index_power;
+        let linear_max: u64 = 2.0_f64.powi(linear_power as i32) as u64 - 1;
 
-        let mut buckets_outer = 64;
+        let max_value_power: u32 = 64 - config.max_value.leading_zeros();
 
-        if shift <= 64 {
-            buckets_outer = 64 - config.max_value.leading_zeros() - direct_index_power;
+        let mut buckets_outer = 0;
+
+        if max_value_power > linear_power {
+            buckets_outer = max_value_power - linear_power;
         }
 
-        let buckets_total = buckets_inner * buckets_outer + direct_index_max as u32;
+        let buckets_total = buckets_inner * buckets_outer + linear_max as u32;
 
         let memory_used = buckets_total * 8;
 
@@ -141,14 +169,15 @@ impl Histogram {
             data: HistogramData {
                 data: data,
                 counters: counters,
+                iterator: 0,
             },
             properties: HistogramProperties {
                 buckets_inner: buckets_inner,
                 buckets_outer: buckets_outer,
                 buckets_total: buckets_total,
                 memory_used: memory_used,
-                direct_index_max: direct_index_max,
-                direct_index_power: direct_index_power,
+                linear_max: linear_max,
+                linear_power: linear_power,
             },
         })
     }
@@ -218,24 +247,28 @@ impl Histogram {
     fn get_index(&mut self, value: u64) -> Option<usize> {
         let result: Option<usize> = None;
 
-        if value >= 1 {
+        if value >= 1 && value <= self.config.max_value {
 
-            if value < self.properties.direct_index_max {
+            if value <= self.properties.linear_max {
                 return Some((value - 1) as usize);
             }
 
+            let l_max = self.properties.linear_max as u32;
+
             let outer = 63 - value.leading_zeros();
 
-            let inner =
-                self.properties.buckets_inner as f64 *
-                (value as f64 - 2.0_f64.powi((outer) as i32)) / 2.0_f64.powi((outer) as i32);
+            let l_power = 64 - self.properties.linear_max.leading_zeros();
 
-            let outer = outer as u64;
-            let inner = inner.ceil() as u64;
+            let remain = value as f64 - 2.0_f64.powi(outer as i32);
 
-            let index = (outer - self.properties.direct_index_power as u64) *
-                            self.properties.buckets_inner as u64 + inner +
-                        self.properties.direct_index_max - 1;
+            let inner = (self.properties.buckets_inner as f64 * remain as f64 /
+                         2.0_f64.powi((outer) as i32)).ceil() as u32;
+
+            // this gives the shifted outer index
+            let outer = outer as u32 - l_power;
+
+            let index = l_max + self.properties.buckets_inner * outer + inner;
+
             return Some(index as usize);
         }
         result
@@ -244,20 +277,23 @@ impl Histogram {
     // calculate the nominal value of the given index
     fn index_value(&mut self, index: usize) -> u64 {
 
-        if index < self.properties.direct_index_max as usize {
+        // in this case, the index is linear
+        let index = index as u32;
+
+        let linear_max = self.properties.linear_max as u32;
+
+        if index < linear_max {
             return (index + 1) as u64;
         }
 
-        let index = (index as u32 - self.properties.direct_index_max as u32 +
-                     self.properties.direct_index_power * self.properties.buckets_inner as u32 +
-                     1) as usize;
+        let log_index = index - linear_max;
 
-        let power = (index as f64 / self.properties.buckets_inner as f64).floor() as u32;
+        let outer = (log_index as f64 / self.properties.buckets_inner as f64).floor() as u32;
 
-        let remain = index - (power * self.properties.buckets_inner) as usize;
+        let inner = log_index - outer * self.properties.buckets_inner as u32;
 
-        let mut value = 2.0_f64.powi((power as u32) as i32);
-        value += remain as f64 * (value as f64 / self.properties.buckets_inner as f64);
+        let mut value = 2.0_f64.powi((outer as u32 + self.properties.linear_power) as i32);
+        value += inner as f64 * (value as f64 / self.properties.buckets_inner as f64);
 
         value.floor() as u64
     }
@@ -360,6 +396,62 @@ mod tests {
     use super::{Histogram, HistogramConfig};
 
     #[test]
+    fn test_new_0() {
+        // this histogram has only a linear region which runs 1-15
+
+        let h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 10,
+            precision: 1,
+        }).unwrap();
+
+        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
+        assert_eq!(h.properties.buckets_outer, 0); // max <= 2 * buckets_inner
+        assert_eq!(h.properties.buckets_total, 15); // only linear region
+    }
+
+    #[test]
+    fn test_new_1() {
+        // this histogram has linear and log regios
+
+        let h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 31,
+            precision: 1,
+        }).unwrap();
+
+        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
+        assert_eq!(h.properties.buckets_outer, 1); // max <= 2 * buckets_inner
+        assert_eq!(h.properties.buckets_total, 25); // only linear region
+    }
+
+    #[test]
+    fn test_new_2() {
+        let h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 32,
+            precision: 1,
+        }).unwrap();
+
+        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
+        assert_eq!(h.properties.buckets_outer, 2); // max <= 2 * buckets_inner
+        assert_eq!(h.properties.buckets_total, 35); // only linear region
+    }
+
+    #[test]
+    fn test_new_3() {
+        let h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 10000,
+            precision: 3,
+        }).unwrap();
+
+        assert_eq!(h.properties.buckets_inner, 1000); // 10 ^ precision
+        assert_eq!(h.properties.buckets_outer, 4); // max <= 2 * buckets_inner
+        assert_eq!(h.properties.buckets_total, 5023); // only linear region
+    }
+
+    #[test]
     fn test_increment_0() {
         let mut h = Histogram::new(HistogramConfig {
             max_memory: 0,
@@ -446,22 +538,70 @@ mod tests {
     fn test_get_index_1() {
         let mut h = Histogram::new(HistogramConfig {
             max_memory: 0,
-            max_value: 1000000,
-            precision: 2,
+            max_value: 100,
+            precision: 1,
         }).unwrap();
 
         assert_eq!(h.get_index(1), Some(0));
-        assert_eq!(h.index_value(0), 1);
-
         assert_eq!(h.get_index(2), Some(1));
+        assert_eq!(h.get_index(15), Some(14));
+
+        // powers of two are 10 apart from value = 16 and up
+        assert_eq!(h.get_index(16), Some(15));
+        assert_eq!(h.get_index(32), Some(25));
+        assert_eq!(h.get_index(64), Some(35));
+
+        // this tests that rounding up within inner bucket works
+        assert_eq!(h.get_index(16), Some(15));
+        assert_eq!(h.get_index(17), Some(16));
+        assert_eq!(h.get_index(18), Some(17));
+        assert_eq!(h.get_index(19), Some(17));
+
+        // these values prove roll-up into next outer bucket works
+        assert_eq!(h.get_index(62), Some(35));
+        assert_eq!(h.get_index(63), Some(35));
+        assert_eq!(h.get_index(64), Some(35));
+
+        assert_eq!(h.get_index(65), Some(36));
+    }
+
+    #[test]
+    fn test_index_value_0() {
+        let mut h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 100,
+            precision: 1,
+        }).unwrap();
+
+        assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
+        assert_eq!(h.index_value(14), 15);
 
-        assert_eq!(h.get_index(128), Some(163));
-        assert_eq!(h.index_value(163), 128);
+        assert_eq!(h.index_value(15), 16);
+        assert_eq!(h.index_value(25), 32);
+        assert_eq!(h.index_value(35), 64);
+    }
 
-        assert_eq!(h.get_index(256), Some(263));
-        assert_eq!(h.get_index(255), Some(263));
-        assert_eq!(h.get_index(257), Some(264));
-        assert_eq!(h.get_index(258), Some(264));
+    #[test]
+    fn test_iterator() {
+        let mut h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 100,
+            precision: 1,
+        }).unwrap();
+
+        loop {
+            match h.next() {
+                Some(bucket) => {
+                    match h.get_index(bucket.value) {
+                        Some(index) => {
+                            h.increment(bucket.value);
+                        },
+                        None => {},
+                    }
+                },
+                None => { break }
+            }
+        }
     }
 }
