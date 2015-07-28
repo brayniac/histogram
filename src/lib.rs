@@ -719,6 +719,41 @@ mod tests {
     }
 
     #[test]
+    fn test_index_value_1() {
+        let mut h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 1000,
+            precision: 2,
+        }).unwrap();
+
+        assert_eq!(h.index_value(0), 1);
+        assert_eq!(h.index_value(1), 2);
+        assert_eq!(h.index_value(126), 127);
+
+        assert_eq!(h.index_value(127), 128);
+        assert_eq!(h.index_value(227), 256);
+        assert_eq!(h.index_value(327), 512);
+    }
+
+    #[test]
+    fn test_index_value_2() {
+        let mut h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 10000,
+            precision: 3,
+        }).unwrap();
+
+        assert_eq!(h.index_value(0), 1);
+        assert_eq!(h.index_value(1), 2);
+        assert_eq!(h.index_value(1022), 1023);
+
+        assert_eq!(h.index_value(1023), 1024);
+        assert_eq!(h.index_value(2023), 2048);
+        assert_eq!(h.index_value(3023), 4096);
+        assert_eq!(h.index_value(4023), 8192);
+    }
+
+    #[test]
     fn test_iterator() {
         let mut h = Histogram::new(HistogramConfig {
             max_memory: 0,
