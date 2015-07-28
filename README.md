@@ -5,6 +5,7 @@ storage with percentile stats. Maintains precision guarentees
 throughout the range of stored values.
 
 [![Build Status](https://travis-ci.org/brayniac/histogram.svg?branch=master)](https://travis-ci.org/brayniac/histogram)
+[![crates.io](http://meritbadge.herokuapp.com/histogram)](https://crates.io/crates/mio)
 
 ## Usage
 
