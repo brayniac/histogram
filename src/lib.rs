@@ -104,7 +104,6 @@ impl Iterator for Histogram {
             self.data.iterator = 0;
             None
         } else {
-            //println!("Iterating: current: {}", current);
             Some(HistogramBucket {
                 id: current as u64,
                 value: self.index_value(current),
@@ -304,9 +303,6 @@ impl Histogram {
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
                          2.0_f64.powi((outer) as i32)).floor() as u32;
-
-            println!("Value: {} Outer: {} l_max: {} l_power: {} Remain: {} Inner: {}", value,
-                     outer, l_max, l_power, remain, inner);
 
             // this gives the shifted outer index
             let outer = outer as u32 - l_power;
