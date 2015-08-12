@@ -6,6 +6,7 @@ throughout the range of stored values.
 
 [![Build Status](https://travis-ci.org/brayniac/histogram.svg?branch=master)](https://travis-ci.org/brayniac/histogram)
 [![crates.io](http://meritbadge.herokuapp.com/histogram)](https://crates.io/crates/histogram)
+[![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
 ## Usage
 
