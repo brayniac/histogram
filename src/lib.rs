@@ -50,6 +50,8 @@
 
 #![crate_name = "histogram"]
 
+use std::fmt;
+
 #[derive(Default)]
 pub struct HistogramConfig {
     pub precision: u32,
@@ -110,6 +112,12 @@ impl Iterator for Histogram {
                 count: self.data.data[current],
             })
         }
+    }
+}
+
+impl fmt::Debug for Histogram {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({} total)", self.data.counters.entries_total)
     }
 }
 
