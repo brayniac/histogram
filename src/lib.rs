@@ -52,14 +52,14 @@
 
 use std::fmt;
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct HistogramConfig {
     pub precision: u32,
     pub max_memory: u32,
     pub max_value: u64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct HistogramCounters {
     entries_total: u64,
     missed_unknown: u64,
@@ -67,13 +67,14 @@ pub struct HistogramCounters {
     missed_large: u64,
 }
 
+#[derive(Clone)]
 pub struct HistogramData {
     data: Vec<u64>,
     counters: HistogramCounters,
     iterator: usize,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Copy)]
 pub struct HistogramProperties {
     buckets_inner: u32,
     buckets_outer: u32,
@@ -83,12 +84,14 @@ pub struct HistogramProperties {
     linear_power: u32,
 }
 
+#[derive(Clone)]
 pub struct Histogram {
     config: HistogramConfig,
     data: HistogramData,
     properties: HistogramProperties,
 }
 
+#[derive(Clone, Copy)]
 pub struct HistogramBucket {
     pub value: u64,
     pub count: u64,
@@ -186,6 +189,33 @@ impl Histogram {
                 linear_power: linear_power,
             },
         })
+    }
+
+    /// clear the histogram data
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    ///
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// h.increment(1);
+    /// assert_eq!(h.entries(), 1);
+    /// h.clear();
+    /// assert_eq!(h.entries(), 0);
+    pub fn clear(&mut self) {
+        self.data.counters = Default::default();
+        self.data.data = Vec::with_capacity(self.properties.buckets_total as usize);
+
+        // vector is already sized to fit, just set the length accordingly
+        unsafe {
+            self.data.data.set_len(self.properties.buckets_total as usize);
+        }
     }
 
     /// increment the count for a value
