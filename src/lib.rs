@@ -448,6 +448,110 @@ impl Histogram {
         None
     }
 
+    /// arithmetic mean approximation across the histogram
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// for value in 1..1000 {
+    ///     h.increment(value);
+    /// }
+    ///
+    /// assert_eq!(h.mean().unwrap(), 500);
+    pub fn mean(&mut self) -> Option<u64> {
+
+        if self.entries() < 1 {
+            return None;
+        }
+
+        let total = self.entries();
+
+        let mut mean = 0.0_f64;
+
+        for index in 0..(self.properties.buckets_total as usize) {
+            mean += (self.index_value(index) as f64 * self.data.data[index] as f64) as f64 /
+                    total as f64;
+        }
+        Some(mean.ceil() as u64)
+    }
+
+    /// standard variance approximation across the histogram
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// for value in 1..11 {
+    ///     h.increment(value);
+    /// }
+    ///
+    /// assert_eq!(h.stdvar().unwrap(), 9);
+    pub fn stdvar(&mut self) -> Option<u64> {
+
+        if self.entries() < 1 {
+            return None;
+        }
+
+        let total = self.entries() as f64;
+
+        let m = self.mean().unwrap() as f64;
+
+        let mut stdvar = 0.0_f64;
+
+        for index in 0..(self.properties.buckets_total as usize) {
+            let v = self.index_value(index) as f64;
+            let c = self.data.data[index] as f64;
+            stdvar += (c * v * v) - (2_f64 * c * m * v) + (c * m * m);
+        }
+
+        stdvar /= total;
+
+        Some(stdvar.ceil() as u64)
+    }
+
+    /// standard deviation approximation across the histogram
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// for value in 1..11 {
+    ///     h.increment(value);
+    /// }
+    ///
+    /// assert_eq!(h.stddev().unwrap(), 3);
+    pub fn stddev(&mut self) -> Option<u64> {
+
+        if self.entries() < 1 {
+            return None;
+        }
+
+        let stdvar = self.stdvar().unwrap() as f64;
+
+        let stddev = stdvar.sqrt();
+
+        Some(stddev.ceil() as u64)
+    }
+
     /// merge one Histogram into another Histogram
     ///
     /// # Example
