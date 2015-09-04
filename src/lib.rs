@@ -414,10 +414,6 @@ impl Histogram {
 
             need = total - need;
 
-            if need == 0 {
-                need = 1;
-            }
-
             let mut index: isize = (self.properties.buckets_total - 1) as isize;
             let mut step: isize = -1 as isize;
             let mut have: u64 = 0 as u64;
@@ -426,6 +422,10 @@ impl Histogram {
                 index = 0 as isize;
                 step = 1 as isize;
                 need = total - need;
+            }
+
+            if need == 0 {
+                need = 1;
             }
 
             loop {
@@ -812,5 +812,27 @@ mod tests {
                 None => { break }
             }
         }
+    }
+
+    #[test]
+    fn test_percentile() {
+        let mut h = Histogram::new(HistogramConfig {
+            max_memory: 0,
+            max_value: 1000,
+            precision: 4,
+        }).unwrap();
+
+        for i in 100..200 {
+            h.increment(i);
+        }
+
+        assert_eq!(h.percentile(0.0).unwrap(), 100);
+        assert_eq!(h.percentile(10.0).unwrap(), 109);
+        assert_eq!(h.percentile(25.0).unwrap(), 124);
+        assert_eq!(h.percentile(50.0).unwrap(), 150);
+        assert_eq!(h.percentile(75.0).unwrap(), 175);
+        assert_eq!(h.percentile(90.0).unwrap(), 190);
+        assert_eq!(h.percentile(95.0).unwrap(), 195);
+        assert_eq!(h.percentile(100.0).unwrap(), 199);
     }
 }
