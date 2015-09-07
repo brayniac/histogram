@@ -45,6 +45,14 @@
 //!     histogram.percentile(99.0).unwrap(),
 //!     histogram.percentile(99.9).unwrap(),
 //! );
+//!
+//! // print additional statistics
+//! println!("Latency (ns): Min: {} Avg: {} Max: {} StdDev: {}",
+//!     histogram.minimum().unwrap(),
+//!     histogram.mean().unwrap(),
+//!     histogram.maximum().unwrap(),
+//!     histogram.stddev().unwrap(),
+//! );
 
 #![crate_type = "lib"]
 
@@ -234,24 +242,7 @@ impl Histogram {
     /// h.increment(1);
     /// assert_eq!(h.get(1).unwrap(), 1);
     pub fn increment(&mut self, value: u64) {
-        self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(1_u64);
-        if value < 1 {
-            self.data.counters.missed_small =
-                self.data.counters.missed_small.saturating_add(1_u64);
-        } else if value > self.config.max_value {
-            self.data.counters.missed_large =
-                self.data.counters.missed_large.saturating_add(1_u64);
-        } else {
-            match self.get_index(value) {
-                Some(index) => {
-                    self.data.data[index] = self.data.data[index].saturating_add(1_u64);
-                },
-                None => {
-                    self.data.counters.missed_unknown =
-                        self.data.counters.missed_unknown.saturating_add(1_u64);
-                }
-            }
-        }
+        self.record(value, 1_u64);
     }
 
     /// record additional counts for value
@@ -396,15 +387,15 @@ impl Histogram {
     /// assert_eq!(h.percentile(90.0).unwrap(), 901);
     /// assert_eq!(h.percentile(99.0).unwrap(), 991);
     /// assert_eq!(h.percentile(99.9).unwrap(), 999);
-    pub fn percentile(&mut self, percentile: f64) -> Option<u64> {
+    pub fn percentile(&mut self, percentile: f64) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
-            return None;
+            return Err("no data");
         }
 
         if percentile <= 100.0 && percentile >= 0.0 {
 
-            let total = self.data.counters.entries_total;
+            let total = self.entries();
 
             let mut need = (total as f64 * (percentile / 100.0_f64)).ceil() as u64;
 
@@ -414,30 +405,37 @@ impl Histogram {
 
             need = total - need;
 
-            let mut index: isize = (self.properties.buckets_total - 1) as isize;
+            let mut index: isize = (self.buckets_total() - 1) as isize;
             let mut step: isize = -1 as isize;
-            let mut have: u64 = 0 as u64;
+            let mut have: u64 = self.data.counters.missed_large;
 
             if percentile < 50.0 {
                 index = 0 as isize;
                 step = 1 as isize;
                 need = total - need;
+                have = self.data.counters.missed_small;
             }
 
             if need == 0 {
                 need = 1;
             }
 
+            if have >= need {
+                if index == 0 {
+                    return Err("underflow");
+                }
+                return Err("overflow");
+            }
             loop {
                 have = have + self.data.data[index as usize];
 
                 if have >= need {
-                    return Some(self.index_value(index as usize) as u64);
+                    return Ok(self.index_value(index as usize) as u64);
                 }
 
                 index += step;
 
-                if index > self.properties.buckets_total as isize {
+                if index > self.buckets_total() as isize {
                     break;
                 }
                 if index < 0 {
@@ -445,7 +443,47 @@ impl Histogram {
                 }
             }
         }
-        None
+        Err("unknown failure")
+    }
+
+    /// convenience function for min
+    ///
+    /// # Example
+    /// # use histogram::*;
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// for value in 1..1000 {
+    ///     h.increment(value);
+    /// }
+    ///
+    /// assert_eq!(h.minimum().unwrap(), 1);
+    pub fn minimum(&mut self) -> Result<u64, &'static str> {
+        self.percentile(0.0_f64)
+    }
+
+    /// convenience function for max
+    ///
+    /// # Example
+    /// # use histogram::*;
+    /// let mut h = Histogram::new(
+    ///     HistogramConfig{
+    ///         max_memory: 0,
+    ///         max_value: 1000000,
+    ///         precision: 3,
+    /// }).unwrap();
+    ///
+    /// for value in 1..1000 {
+    ///     h.increment(value);
+    /// }
+    ///
+    /// assert_eq!(h.maximum().unwrap(), 999);
+    pub fn maximum(&mut self) -> Result<u64, &'static str> {
+        self.percentile(100.0_f64)
     }
 
     /// arithmetic mean approximation across the histogram
@@ -465,21 +503,21 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.mean().unwrap(), 500);
-    pub fn mean(&mut self) -> Option<u64> {
+    pub fn mean(&mut self) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
-            return None;
+            return Err("no data");
         }
 
         let total = self.entries();
 
         let mut mean = 0.0_f64;
 
-        for index in 0..(self.properties.buckets_total as usize) {
+        for index in 0..(self.buckets_total() as usize) {
             mean += (self.index_value(index) as f64 * self.data.data[index] as f64) as f64 /
                     total as f64;
         }
-        Some(mean.ceil() as u64)
+        Ok(mean.ceil() as u64)
     }
 
     /// standard variance approximation across the histogram
@@ -499,10 +537,10 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.stdvar().unwrap(), 9);
-    pub fn stdvar(&mut self) -> Option<u64> {
+    pub fn stdvar(&mut self) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
-            return None;
+            return Err("no data");
         }
 
         let total = self.entries() as f64;
@@ -511,7 +549,7 @@ impl Histogram {
 
         let mut stdvar = 0.0_f64;
 
-        for index in 0..(self.properties.buckets_total as usize) {
+        for index in 0..(self.buckets_total() as usize) {
             let v = self.index_value(index) as f64;
             let c = self.data.data[index] as f64;
             stdvar += (c * v * v) - (2_f64 * c * m * v) + (c * m * m);
@@ -519,7 +557,7 @@ impl Histogram {
 
         stdvar /= total;
 
-        Some(stdvar.ceil() as u64)
+        Ok(stdvar.ceil() as u64)
     }
 
     /// standard deviation approximation across the histogram
@@ -615,6 +653,10 @@ impl Histogram {
     /// assert_eq!(h.entries(), 1);
     pub fn entries(&mut self) -> u64 {
         self.data.counters.entries_total
+    }
+
+    fn buckets_total(&mut self) -> u64 {
+        self.properties.buckets_total as u64
     }
 }
 
