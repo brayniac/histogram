@@ -214,16 +214,19 @@ impl Histogram {
     ///
     /// h.increment(1);
     /// assert_eq!(h.entries(), 1);
-    /// h.clear();
+    /// h.clear().unwrap();
     /// assert_eq!(h.entries(), 0);
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> Result<(), &'static str> {
         self.data.counters = Default::default();
         self.data.data = Vec::with_capacity(self.properties.buckets_total as usize);
 
         // vector is already sized to fit, just set the length accordingly
         unsafe {
             self.data.data.set_len(self.properties.buckets_total as usize);
+
         }
+
+        return Ok(());
     }
 
     /// increment the count for a value
@@ -241,8 +244,8 @@ impl Histogram {
     ///
     /// h.increment(1);
     /// assert_eq!(h.get(1).unwrap(), 1);
-    pub fn increment(&mut self, value: u64) {
-        self.record(value, 1_u64);
+    pub fn increment(&mut self, value: u64) -> Result<(), &'static str> {
+        self.record(value, 1_u64)
     }
 
     /// record additional counts for value
@@ -266,22 +269,26 @@ impl Histogram {
     ///
     /// h.record(10, 10);
     /// assert_eq!(h.get(10).unwrap(), 10);
-    pub fn record(&mut self, value: u64, count: u64) {
+    pub fn record(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
         self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(count);
         if value < 1 {
             self.data.counters.missed_small =
                 self.data.counters.missed_small.saturating_add(count);
+            return Err("sample value too small");
         } else if value > self.config.max_value {
             self.data.counters.missed_large =
                 self.data.counters.missed_large.saturating_add(count);
+            return Err("sample value too large");
         } else {
             match self.get_index(value) {
                 Some(index) => {
                     self.data.data[index] = self.data.data[index].saturating_add(count);
+                    return Ok(());
                 },
                 None => {
                     self.data.counters.missed_unknown =
                         self.data.counters.missed_unknown.saturating_add(count);
+                    return Err("sample unknown error")
                 }
             }
         }
@@ -380,7 +387,7 @@ impl Histogram {
     /// }).unwrap();
     ///
     /// for value in 1..1000 {
-    ///     h.increment(value);
+    ///     h.increment(value).unwrap();
     /// }
     ///
     /// assert_eq!(h.percentile(50.0).unwrap(), 501);
@@ -628,7 +635,10 @@ impl Histogram {
         loop {
             match other.next() {
                 Some(bucket) => {
-                    self.record(bucket.value, bucket.count);
+                    match self.record(bucket.value, bucket.count) {
+                        Ok(_) => {},
+                        Err(_) => {},
+                    }
                 }
                 None => { break }
             }
@@ -729,7 +739,7 @@ mod tests {
         }).unwrap();
 
         for op in 1..1000000 {
-            h.increment(1);
+            h.increment(1).unwrap();
             assert_eq!(h.entries(), op);
         }
     }
@@ -744,9 +754,9 @@ mod tests {
 
         // increment values across the entire range
         // including 0 and > max_value
-        for v in 0..11 {
-            h.increment(v);
-            assert_eq!(h.entries(), (v + 1));
+        for v in 1..11 {
+            h.increment(v).unwrap();
+            assert_eq!(h.entries(), v);
         }
     }
 
@@ -758,13 +768,13 @@ mod tests {
             precision: 1,
         }).unwrap();
 
-        h.increment(1);
+        h.increment(1).unwrap();
         assert_eq!(h.get(1), Some(1));
 
-        h.increment(1);
+        h.increment(1).unwrap();
         assert_eq!(h.get(1), Some(2));
 
-        h.increment(2);
+        h.increment(2).unwrap();
         assert_eq!(h.get(2), Some(1));
 
         assert_eq!(h.get(3), Some(0));
@@ -948,11 +958,9 @@ mod tests {
         loop {
             match h.next() {
                 Some(bucket) => {
-                    match h.get_index(bucket.value) {
-                        Some(_) => {
-                            h.increment(bucket.value);
-                        },
-                        None => {},
+                    match h.increment(bucket.value) {
+                        Ok(_) => {},
+                        Err(_) => {},
                     }
                 },
                 None => { break }
@@ -969,7 +977,7 @@ mod tests {
         }).unwrap();
 
         for i in 100..200 {
-            h.increment(i);
+            h.increment(i).ok().expect("error");
         }
 
         assert_eq!(h.percentile(0.0).unwrap(), 100);
