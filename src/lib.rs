@@ -217,13 +217,14 @@ impl Histogram {
     /// h.clear().unwrap();
     /// assert_eq!(h.entries(), 0);
     pub fn clear(&mut self) -> Result<(), &'static str> {
-        self.data.counters = Default::default();
-        self.data.data = Vec::with_capacity(self.properties.buckets_total as usize);
+        // clear everything manually, weird results in practice?
+        self.data.counters.entries_total = 0;
+        self.data.counters.missed_small = 0;
+        self.data.counters.missed_large = 0;
+        self.data.counters.missed_unknown = 0;
 
-        // vector is already sized to fit, just set the length accordingly
-        unsafe {
-            self.data.data.set_len(self.properties.buckets_total as usize);
-
+        for i in 0..self.data.data.len() {
+            self.data.data[i] = 0;
         }
 
         return Ok(());
@@ -584,6 +585,17 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.stddev().unwrap(), 3);
+    ///
+    /// h.clear();
+    ///
+    /// for value in 1..4 {
+    ///     h.increment(value);
+    /// }
+    /// for _ in 0..26 {
+    ///     h.increment(1);
+    /// }
+    ///
+    /// assert_eq!(h.stddev().unwrap(), 1);
     pub fn stddev(&mut self) -> Option<u64> {
 
         if self.entries() < 1 {
