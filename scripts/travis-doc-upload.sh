@@ -11,6 +11,8 @@ cargo doc
 
 [ "$TRAVIS_BRANCH" = master ]
 
+[ "$TRAVIS_OS_NAME" = linux ]
+
 [ "$TRAVIS_PULL_REQUEST" = false ]
 
 eval key=\$encrypted_${SSH_KEY_TRAVIS_ID}_key
