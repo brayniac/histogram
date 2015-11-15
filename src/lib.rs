@@ -300,6 +300,10 @@ impl Histogram {
             data.set_len(buckets_total as usize);
         }
 
+        for i in 0..data.len() {
+            data[i] = 0;
+        }
+
         let counters = HistogramCounters::new();
 
         Some(Histogram {
