@@ -541,7 +541,7 @@ impl Histogram {
 
                 index += step;
 
-                if index > self.buckets_total() as isize {
+                if index >= self.buckets_total() as isize {
                     break;
                 }
                 if index < 0 {
@@ -1040,4 +1040,26 @@ mod tests {
         assert_eq!(h.percentile(95.0).unwrap(), 195);
         assert_eq!(h.percentile(100.0).unwrap(), 199);
     }
+
+   #[test]
+   fn test_percentile_bad() {
+       let mut c = HistogramConfig::new();
+       c.max_value(1_000).precision(4);
+       let mut h = Histogram::configured(c).unwrap();
+
+       let _ = h.increment(5_000);
+
+       assert!(h.percentile(0.0).is_err());
+       assert!(h.percentile(50.0).is_err());
+       assert!(h.percentile(100.0).is_err());
+
+       let _ = h.increment(1);
+
+       assert!(h.percentile(0.0).is_ok());
+
+       let _ = h.increment(500);
+       let _ = h.increment(500);
+
+       assert!(h.percentile(50.0).is_ok());
+   }
 }
