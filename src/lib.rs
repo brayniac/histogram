@@ -293,16 +293,7 @@ impl Histogram {
             return None;
         }
 
-        let mut data = Vec::with_capacity(buckets_total as usize);
-
-        // vector is already sized to fit, just set the length accordingly
-        unsafe {
-            data.set_len(buckets_total as usize);
-        }
-
-        for i in 0..data.len() {
-            data[i] = 0;
-        }
+        let data = vec![0; buckets_total as usize];
 
         let counters = HistogramCounters::new();
 
@@ -1041,25 +1032,25 @@ mod tests {
         assert_eq!(h.percentile(100.0).unwrap(), 199);
     }
 
-   #[test]
-   fn test_percentile_bad() {
-       let mut c = HistogramConfig::new();
-       c.max_value(1_000).precision(4);
-       let mut h = Histogram::configured(c).unwrap();
+    #[test]
+    fn test_percentile_bad() {
+        let mut c = HistogramConfig::new();
+        c.max_value(1_000).precision(4);
+        let mut h = Histogram::configured(c).unwrap();
 
-       let _ = h.increment(5_000);
+        let _ = h.increment(5_000);
 
-       assert!(h.percentile(0.0).is_err());
-       assert!(h.percentile(50.0).is_err());
-       assert!(h.percentile(100.0).is_err());
+        assert!(h.percentile(0.0).is_err());
+        assert!(h.percentile(50.0).is_err());
+        assert!(h.percentile(100.0).is_err());
 
-       let _ = h.increment(1);
+        let _ = h.increment(1);
 
-       assert!(h.percentile(0.0).is_ok());
+        assert!(h.percentile(0.0).is_ok());
 
-       let _ = h.increment(500);
-       let _ = h.increment(500);
+        let _ = h.increment(500);
+        let _ = h.increment(500);
 
-       assert!(h.percentile(50.0).is_ok());
-   }
+        assert!(h.percentile(50.0).is_ok());
+    }
 }
