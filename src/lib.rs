@@ -717,7 +717,7 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::{Histogram, HistogramConfig};
     ///
     /// let mut h = Histogram::new().unwrap();
     ///
@@ -728,7 +728,32 @@ impl Histogram {
         self.data.counters.entries_total
     }
 
-    fn buckets_total(&mut self) -> u64 {
+    /// return the number of buckets in the Histogram
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram, HistogramConfig};
+    ///
+    /// let mut h = Histogram::new().unwrap();
+    ///
+    /// assert_eq!(h.buckets_total(), 27023);
+    ///
+    /// let mut c = HistogramConfig::new();
+    /// c.max_value(1_000_000_000);
+    /// let mut h = Histogram::configured(c).unwrap();
+    ///
+    /// assert_eq!(h.buckets_total(), 21023);
+    ///
+    /// c.precision(4);
+    /// let mut h = Histogram::configured(c).unwrap();
+    ///
+    /// assert_eq!(h.buckets_total(), 176383);
+    ///
+    /// c.precision(2);
+    /// let mut h = Histogram::configured(c).unwrap();
+    ///
+    /// assert_eq!(h.buckets_total(), 2427);
+    pub fn buckets_total(&mut self) -> u64 {
         self.properties.buckets_total as u64
     }
 }
