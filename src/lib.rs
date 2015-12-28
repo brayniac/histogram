@@ -402,7 +402,7 @@ impl Histogram {
     /// let mut h = Histogram::new().unwrap();
     ///
     /// assert_eq!(h.get(1).unwrap(), 0);
-    pub fn get(&mut self, value: u64) -> Option<u64> {
+    pub fn get(&self, value: u64) -> Option<u64> {
         match self.get_index(value) {
             Some(index) => {
                 return Some(self.data.data[index]);
@@ -414,7 +414,7 @@ impl Histogram {
     }
 
     // calculate the index for a given value
-    fn get_index(&mut self, value: u64) -> Option<usize> {
+    fn get_index(&self, value: u64) -> Option<usize> {
         let result: Option<usize> = None;
 
         if value >= 1 {
@@ -446,7 +446,7 @@ impl Histogram {
     }
 
     // calculate the nominal value of the given index
-    fn index_value(&mut self, index: usize) -> u64 {
+    fn index_value(&self, index: usize) -> u64 {
 
         // in this case, the index is linear
         let index = index as u32;
@@ -484,7 +484,7 @@ impl Histogram {
     /// assert_eq!(h.percentile(90.0).unwrap(), 901);
     /// assert_eq!(h.percentile(99.0).unwrap(), 991);
     /// assert_eq!(h.percentile(99.9).unwrap(), 999);
-    pub fn percentile(&mut self, percentile: f64) -> Result<u64, &'static str> {
+    pub fn percentile(&self, percentile: f64) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
             return Err("no data");
@@ -554,7 +554,7 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.minimum().unwrap(), 1);
-    pub fn minimum(&mut self) -> Result<u64, &'static str> {
+    pub fn minimum(&self) -> Result<u64, &'static str> {
         self.percentile(0.0_f64)
     }
 
@@ -569,7 +569,7 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.maximum().unwrap(), 999);
-    pub fn maximum(&mut self) -> Result<u64, &'static str> {
+    pub fn maximum(&self) -> Result<u64, &'static str> {
         self.percentile(100.0_f64)
     }
 
@@ -585,7 +585,7 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.mean().unwrap(), 500);
-    pub fn mean(&mut self) -> Result<u64, &'static str> {
+    pub fn mean(&self) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
             return Err("no data");
@@ -614,7 +614,7 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.stdvar().unwrap(), 9);
-    pub fn stdvar(&mut self) -> Result<u64, &'static str> {
+    pub fn stdvar(&self) -> Result<u64, &'static str> {
 
         if self.entries() < 1 {
             return Err("no data");
@@ -660,7 +660,7 @@ impl Histogram {
     /// }
     ///
     /// assert_eq!(h.stddev().unwrap(), 1);
-    pub fn stddev(&mut self) -> Option<u64> {
+    pub fn stddev(&self) -> Option<u64> {
 
         if self.entries() < 1 {
             return None;
@@ -724,7 +724,7 @@ impl Histogram {
     /// assert_eq!(h.entries(), 0);
     /// h.increment(1);
     /// assert_eq!(h.entries(), 1);
-    pub fn entries(&mut self) -> u64 {
+    pub fn entries(&self) -> u64 {
         self.data.counters.entries_total
     }
 
@@ -753,7 +753,7 @@ impl Histogram {
     /// let mut h = Histogram::configured(c).unwrap();
     ///
     /// assert_eq!(h.buckets_total(), 2427);
-    pub fn buckets_total(&mut self) -> u64 {
+    pub fn buckets_total(&self) -> u64 {
         self.properties.buckets_total as u64
     }
 }
@@ -854,7 +854,7 @@ mod tests {
     fn test_get_index_0() {
         let mut c = HistogramConfig::new();
         c.max_value(32).precision(3);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         // all values should index directly to (value - 1)
         // no estimated buckets are needed given the precision and max
@@ -885,7 +885,7 @@ mod tests {
     fn test_get_index_1() {
         let mut c = HistogramConfig::new();
         c.max_value(100).precision(1);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         assert_eq!(h.get_index(1), Some(0));
         assert_eq!(h.get_index(2), Some(1));
@@ -915,7 +915,7 @@ mod tests {
         // extensive test from precomputed table
         let mut c = HistogramConfig::new();
         c.max_value(100).precision(1);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
                      26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
@@ -945,7 +945,7 @@ mod tests {
         // extensive test from precomputed table
         let mut c = HistogramConfig::new();
         c.max_value(250).precision(1);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
                      26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
@@ -974,7 +974,7 @@ mod tests {
     fn test_index_value_0() {
         let mut c = HistogramConfig::new();
         c.max_value(100).precision(1);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
@@ -989,7 +989,7 @@ mod tests {
     fn test_index_value_1() {
         let mut c = HistogramConfig::new();
         c.max_value(1_000).precision(2);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
@@ -1004,7 +1004,7 @@ mod tests {
     fn test_index_value_2() {
         let mut c = HistogramConfig::new();
         c.max_value(10_000).precision(3);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);

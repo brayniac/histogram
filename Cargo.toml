@@ -1,6 +1,6 @@
 [package]
 name = "histogram"
-version = "0.3.4"
+version = "0.3.5"
 authors = ["Brian Martin <brayniac@gmail.com>"]
 
 license = "MIT"
