@@ -64,6 +64,17 @@ pub struct HistogramConfig {
     radix: u32,
 }
 
+impl Default for HistogramConfig {
+    fn default() -> HistogramConfig {
+        HistogramConfig {
+            precision: 3,
+            max_memory: 0,
+            max_value: 60_000_000_000,
+            radix: 10,
+        }
+    }
+}
+
 impl HistogramConfig {
     /// create a new HistogramConfig with defaults
     ///
@@ -73,12 +84,7 @@ impl HistogramConfig {
     ///
     /// let mut c = HistogramConfig::new();
     pub fn new() -> HistogramConfig {
-        HistogramConfig {
-            precision: 3,
-            max_memory: 0,
-            max_value: 60_000_000_000,
-            radix: 10,
-        }
+        Default::default()
     }
 
     /// set HistogramConfig precision
@@ -129,14 +135,20 @@ pub struct HistogramCounters {
     missed_large: u64,
 }
 
-impl HistogramCounters {
-    fn new() -> HistogramCounters {
+impl Default for HistogramCounters {
+    fn default() -> HistogramCounters {
         HistogramCounters {
             entries_total: 0,
             missed_unknown: 0,
             missed_small: 0,
             missed_large: 0,
         }
+    }
+}
+
+impl HistogramCounters {
+    fn new() -> HistogramCounters {
+        Default::default()
     }
 
     fn clear(&mut self) -> &mut Self {
@@ -180,7 +192,6 @@ pub struct HistogramBucket {
 }
 
 impl HistogramBucket {
-
     /// return the sample value for the bucket
     ///
     /// # Example
@@ -251,7 +262,6 @@ impl fmt::Debug for Histogram {
 }
 
 impl Histogram {
-
     /// create a new Histogram
     ///
     /// # Example
@@ -335,7 +345,7 @@ impl Histogram {
             self.data.data[i] = 0;
         }
 
-        return Ok(());
+        Ok(())
     }
 
     /// increment the count for a value
@@ -372,22 +382,22 @@ impl Histogram {
         self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(count);
         if value < 1 {
             self.data.counters.missed_small = self.data.counters.missed_small.saturating_add(count);
-            return Err("sample value too small");
+            Err("sample value too small")
         } else if value > self.config.max_value {
             self.data.counters.missed_large = self.data.counters.missed_large.saturating_add(count);
-            return Err("sample value too large");
+            Err("sample value too large")
         } else {
             match self.get_index(value) {
                 Some(index) => {
                     self.data.data[index] = self.data.data[index].saturating_add(count);
-                    return Ok(());
+                    Ok(())
                 }
                 None => {
                     self.data.counters.missed_unknown = self.data
                                                             .counters
                                                             .missed_unknown
                                                             .saturating_add(count);
-                    return Err("sample unknown error");
+                    Err("sample unknown error")
                 }
             }
         }
@@ -404,12 +414,8 @@ impl Histogram {
     /// assert_eq!(h.get(1).unwrap(), 0);
     pub fn get(&self, value: u64) -> Option<u64> {
         match self.get_index(value) {
-            Some(index) => {
-                return Some(self.data.data[index]);
-            }
-            None => {
-                None
-            }
+            Some(index) => Some(self.data.data[index]),
+            None => None,
         }
     }
 
@@ -698,18 +704,8 @@ impl Histogram {
     /// assert_eq!(a.get(1).unwrap(), 1);
     /// assert_eq!(a.get(2).unwrap(), 1);
     pub fn merge(&mut self, other: &mut Histogram) {
-        loop {
-            match other.next() {
-                Some(bucket) => {
-                    match self.record(bucket.value, bucket.count) {
-                        Ok(_) => {}
-                        Err(_) => {}
-                    }
-                }
-                None => {
-                    break;
-                }
-            }
+        for bucket in other {
+            let _ = self.record(bucket.value, bucket.count);
         }
     }
 
