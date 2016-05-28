@@ -2,7 +2,6 @@
 //! specified precision across the full range of stored values. This library is
 //! inspired by the HdrHistogram project.
 //!
-//!
 //! # Goals
 //! * maintain precision across full value range
 //! * provide percentile metrics for stored data
@@ -15,6 +14,12 @@
 //!
 //! Create a new histogram, call increment for every value, retrieve percentile
 //! stats.
+//!
+//! Note that the incremented and decremented values have the
+//! precision which is given upon creation of the histogram (by
+//! default 3 decimals). This means that increment of x and decrement
+//! of y might lead net effect of zero, if x and y are of similar
+//! size.
 //!
 //! # Example
 //!
@@ -359,7 +364,7 @@ impl Histogram {
     /// h.increment(1);
     /// assert_eq!(h.get(1).unwrap(), 1);
     pub fn increment(&mut self, value: u64) -> Result<(), &'static str> {
-        self.record(value, 1_u64)
+        self.increment_by(value, 1_u64)
     }
 
     /// record additional counts for value
@@ -370,15 +375,15 @@ impl Histogram {
     ///
     /// let mut h = Histogram::new().unwrap();
     ///
-    /// h.record(1, 1);
+    /// h.increment_by(1, 1);
     /// assert_eq!(h.get(1).unwrap(), 1);
     ///
-    /// h.record(2, 2);
+    /// h.increment_by(2, 2);
     /// assert_eq!(h.get(2).unwrap(), 2);
     ///
-    /// h.record(10, 10);
+    /// h.increment_by(10, 10);
     /// assert_eq!(h.get(10).unwrap(), 10);
-    pub fn record(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
+    pub fn increment_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
         self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(count);
         if value < 1 {
             self.data.counters.missed_small = self.data.counters.missed_small.saturating_add(count);
@@ -397,6 +402,80 @@ impl Histogram {
                                                             .counters
                                                             .missed_unknown
                                                             .saturating_add(count);
+                    Err("sample unknown error")
+                }
+            }
+        }
+    }
+
+    #[deprecated]
+    pub fn record(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
+        self.increment_by(value, count)
+    }
+
+    /// decrement the count for a value. This functionality is best
+    /// used to remove previously inserted from the histogram.
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    /// let mut h = Histogram::new().unwrap();
+    ///
+    /// h.increment(1).unwrap();
+    /// assert_eq!(h.get(1).unwrap(), 1);
+    /// h.decrement(1).unwrap();
+    /// assert_eq!(h.get(1).unwrap(), 0);
+    pub fn decrement(&mut self, value: u64) -> Result<(), &'static str> {
+        self.decrement_by(value, 1_u64)
+    }
+
+    /// remove count for value from histogram. This functionality is
+    /// best used to remove previously inserted from the
+    /// histogram.
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::{Histogram,HistogramConfig};
+    /// let mut h = Histogram::new().unwrap();
+    ///
+    /// h.increment_by(1, 1).unwrap();
+    /// h.increment_by(2, 2).unwrap();
+    /// h.decrement_by(1, 1).unwrap();
+    ///
+    /// assert_eq!(h.get(2).unwrap(), 2);
+    /// assert_eq!(h.get(1).unwrap(), 0);
+    pub fn decrement_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
+        if value < 1 {
+            if let Some(new_missed_small) = self.data.counters.missed_small.checked_sub(count) {
+                self.data.counters.missed_small = new_missed_small;
+                self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                Err("sample value too small")
+            } else {
+                Err("small sample value underflow")
+            }
+        } else if value > self.config.max_value {
+            if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
+                self.data.counters.missed_large = new_missed_large;
+                self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                Err("sample value too large")
+            } else {
+                Err("large sample value underflow")
+            }
+        } else {
+            match self.get_index(value) {
+                Some(index) => {
+                    if let Some(new_index_value) = self.data.data[index].checked_sub(count) {
+                        self.data.data[index] = new_index_value;
+                        self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                        Ok(())
+                    } else {
+                        Err("underflow")
+                    }
+
+                }
+                None => {
+                    self.data.counters.missed_unknown =
+                        self.data.counters.missed_unknown.saturating_add(count);
                     Err("sample unknown error")
                 }
             }
@@ -705,7 +784,7 @@ impl Histogram {
     /// assert_eq!(a.get(2).unwrap(), 1);
     pub fn merge(&mut self, other: &mut Histogram) {
         for bucket in other {
-            let _ = self.record(bucket.value, bucket.count);
+            let _ = self.increment_by(bucket.value, bucket.count);
         }
     }
 
@@ -828,6 +907,93 @@ mod tests {
             h.increment(v).unwrap();
             assert_eq!(h.entries(), v);
         }
+    }
+
+    #[test]
+    fn test_decrement_0() {
+        let mut h = Histogram::new().unwrap();
+        let m = 1000000;
+
+        for _ in 0..m {
+            h.increment(2).unwrap();
+        }
+
+        for op in 1..m {
+            h.decrement(2).unwrap();
+            assert_eq!(h.entries(), m - op);
+        }
+    }
+
+    #[test]
+    fn test_decrement_1() {
+        let mut c = HistogramConfig::new();
+        c.max_value(20000).precision(3);
+        let mut h = Histogram::configured(c).unwrap();
+        let v = h.properties.linear_max + 2;
+        let m = 1000000;
+
+        for _ in 0..m {
+            h.increment(v).unwrap();
+        }
+
+        for op in 1..m {
+            h.decrement(v).unwrap();
+            assert_eq!(h.entries(), m - op);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "small sample value underflow")]
+    fn test_decrement_2() {
+        let mut h = Histogram::new().unwrap();
+        h.decrement(0).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "sample value too small")]
+    fn test_decrement_3() {
+        let mut h = Histogram::new().unwrap();
+        let _ = h.increment(0);
+        h.decrement(0).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "large sample value underflow")]
+    fn test_decrement_4() {
+        let mut h = Histogram::new().unwrap();
+        let v = h.config.max_value + 1;
+        h.decrement(v).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "sample value too large")]
+    fn test_decrement_5() {
+        let mut h = Histogram::new().unwrap();
+        let v = h.config.max_value + 1;
+        let _ = h.increment(v);
+        h.decrement(v).unwrap();
+    }
+
+    #[test]
+    fn test_decrement_example_0() {
+        let mut h = Histogram::new().unwrap();
+
+        h.increment(1).unwrap();
+        assert_eq!(h.get(1).unwrap(), 1);
+        h.decrement(1).unwrap();
+        assert_eq!(h.get(1).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_decrement_by_example_0() {
+        let mut h = Histogram::new().unwrap();
+
+        h.increment_by(1, 1).unwrap();
+        h.increment_by(2, 2).unwrap();
+        h.decrement_by(1, 1).unwrap();
+
+        assert_eq!(h.get(2).unwrap(), 2);
+        assert_eq!(h.get(1).unwrap(), 0);
     }
 
     #[test]
