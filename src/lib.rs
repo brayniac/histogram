@@ -169,7 +169,6 @@ impl HistogramCounters {
 pub struct HistogramData {
     data: Vec<u64>,
     counters: HistogramCounters,
-    iterator: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -204,7 +203,7 @@ impl HistogramBucket {
     /// use histogram::*;
     ///
     /// let mut h = Histogram::new().unwrap();
-    /// let b = h.next().unwrap();
+    /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.value(), 1);
     pub fn value(self) -> u64 {
@@ -217,8 +216,8 @@ impl HistogramBucket {
     /// ```
     /// use histogram::*;
     ///
-    /// let mut h = Histogram::new().unwrap();
-    /// let b = h.next().unwrap();
+    /// let h = Histogram::new().unwrap();
+    /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.count(), 0);
     pub fn count(self) -> u64 {
@@ -231,8 +230,8 @@ impl HistogramBucket {
     /// ```
     /// use histogram::*;
     ///
-    /// let mut h = Histogram::new().unwrap();
-    /// let b = h.next().unwrap();
+    /// let h = Histogram::new().unwrap();
+    /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.id(), 0);
     pub fn id(self) -> u64 {
@@ -240,23 +239,42 @@ impl HistogramBucket {
     }
 }
 
-impl Iterator for Histogram {
+/// Iterator over a Histogram's buckets.
+pub struct Iter<'a> {
+    hist: &'a Histogram,
+    index: usize,
+}
+
+impl<'a> Iter<'a> {
+    fn new(hist: &'a Histogram) -> Iter<'a> {
+        Iter { hist: hist, index: 0 }
+    }
+}
+
+impl<'a> Iterator for Iter<'a> {
     type Item = HistogramBucket;
 
     fn next(&mut self) -> Option<HistogramBucket> {
-        let current = self.data.iterator;
-        self.data.iterator += 1;
-
-        if current == (self.properties.buckets_total as usize) {
-            self.data.iterator = 0;
+        if self.index == (self.hist.properties.buckets_total as usize) {
             None
         } else {
+            let current = self.index;
+            self.index += 1;
             Some(HistogramBucket {
                 id: current as u64,
-                value: self.index_value(current),
-                count: self.data.data[current],
+                value: self.hist.index_value(current),
+                count: self.hist.data.data[current],
             })
         }
+    }
+}
+
+impl<'a> IntoIterator for &'a Histogram {
+    type Item = HistogramBucket;
+    type IntoIter = Iter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter::new(self)
     }
 }
 
@@ -317,7 +335,6 @@ impl Histogram {
             data: HistogramData {
                 data: data,
                 counters: counters,
-                iterator: 0,
             },
             properties: HistogramProperties {
                 buckets_inner: buckets_inner,
@@ -340,17 +357,14 @@ impl Histogram {
     ///
     /// h.increment(1);
     /// assert_eq!(h.entries(), 1);
-    /// h.clear().unwrap();
+    /// h.clear();
     /// assert_eq!(h.entries(), 0);
-    pub fn clear(&mut self) -> Result<(), &'static str> {
+    pub fn clear(&mut self) {
         // clear everything manually, weird results in practice?
         self.data.counters.clear();
-
-        for i in 0..self.data.data.len() {
-            self.data.data[i] = 0;
+        for x in &mut self.data.data {
+            *x = 0;
         }
-
-        Ok(())
     }
 
     /// increment the count for a value
@@ -782,7 +796,7 @@ impl Histogram {
     /// assert_eq!(a.entries(), 2);
     /// assert_eq!(a.get(1).unwrap(), 1);
     /// assert_eq!(a.get(2).unwrap(), 1);
-    pub fn merge(&mut self, other: &mut Histogram) {
+    pub fn merge(&mut self, other: &Histogram) {
         for bucket in other {
             let _ = self.increment_by(bucket.value, bucket.count);
         }
@@ -1182,21 +1196,16 @@ mod tests {
     fn test_iterator() {
         let mut c = HistogramConfig::new();
         c.max_value(100).precision(1);
-        let mut h = Histogram::configured(c).unwrap();
+        let h = Histogram::configured(c).unwrap();
 
-        loop {
-            match h.next() {
-                Some(bucket) => {
-                    match h.increment(bucket.value) {
-                        Ok(_) => {}
-                        Err(_) => {}
-                    }
-                }
-                None => {
-                    break;
-                }
-            }
+        let mut buckets_seen = 0;
+        for bucket in &h {
+            assert_eq!(bucket.id(), buckets_seen);
+            assert_eq!(bucket.value(), h.index_value(bucket.id() as usize));
+            assert_eq!(bucket.count(), 0);
+            buckets_seen += 1;
         }
+        assert_eq!(h.buckets_total(), buckets_seen);
     }
 
     #[test]
