@@ -247,7 +247,10 @@ pub struct Iter<'a> {
 
 impl<'a> Iter<'a> {
     fn new(hist: &'a Histogram) -> Iter<'a> {
-        Iter { hist: hist, index: 0 }
+        Iter {
+            hist: hist,
+            index: 0,
+        }
     }
 }
 
@@ -413,9 +416,9 @@ impl Histogram {
                 }
                 None => {
                     self.data.counters.missed_unknown = self.data
-                                                            .counters
-                                                            .missed_unknown
-                                                            .saturating_add(count);
+                        .counters
+                        .missed_unknown
+                        .saturating_add(count);
                     Err("sample unknown error")
                 }
             }
@@ -462,7 +465,8 @@ impl Histogram {
         if value < 1 {
             if let Some(new_missed_small) = self.data.counters.missed_small.checked_sub(count) {
                 self.data.counters.missed_small = new_missed_small;
-                self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                self.data.counters.entries_total =
+                    self.data.counters.entries_total.saturating_sub(count);
                 Err("sample value too small")
             } else {
                 Err("small sample value underflow")
@@ -470,7 +474,8 @@ impl Histogram {
         } else if value > self.config.max_value {
             if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
                 self.data.counters.missed_large = new_missed_large;
-                self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                self.data.counters.entries_total =
+                    self.data.counters.entries_total.saturating_sub(count);
                 Err("sample value too large")
             } else {
                 Err("large sample value underflow")
@@ -480,12 +485,12 @@ impl Histogram {
                 Some(index) => {
                     if let Some(new_index_value) = self.data.data[index].checked_sub(count) {
                         self.data.data[index] = new_index_value;
-                        self.data.counters.entries_total = self.data.counters.entries_total.saturating_sub(count);
+                        self.data.counters.entries_total =
+                            self.data.counters.entries_total.saturating_sub(count);
                         Ok(())
                     } else {
                         Err("underflow")
                     }
-
                 }
                 None => {
                     self.data.counters.missed_unknown =
@@ -532,7 +537,7 @@ impl Histogram {
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
                          2.0_f64.powi((outer) as i32))
-                            .floor() as u32;
+                .floor() as u32;
 
             // this gives the shifted outer index
             let outer = outer as u32 - l_power;
