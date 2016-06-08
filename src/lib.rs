@@ -323,7 +323,7 @@ impl Histogram {
         }
 
         let buckets_total = buckets_inner * buckets_outer + linear_max as u32;
-        let memory_used = buckets_total * mem::size_of::<HistogramBucket>() as u32;
+        let memory_used = buckets_total * mem::size_of::<u64>() as u32;
 
         if config.max_memory > 0 && config.max_memory < memory_used {
             return None;
@@ -903,6 +903,17 @@ mod tests {
         assert_eq!(h.properties.buckets_outer, 4); // max <= 2 * buckets_inner
         assert_eq!(h.properties.buckets_total, 5023); // only linear region
     }
+
+    #[test]
+    fn test_new_4() {
+        let mut c = HistogramConfig::new();
+        c.max_value(10_000).precision(3);
+        c.max_memory(8192);
+        if let Some(_) = Histogram::configured(c) {
+            panic!("Created histogram which used too much memory");
+        }
+    }
+
 
     #[test]
     fn test_increment_0() {
