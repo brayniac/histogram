@@ -309,6 +309,16 @@ impl Histogram {
         Default::default()
     }
 
+    /// configure a Histogram
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::Histogram;
+    ///
+    /// let mut h = Histogram::configure()
+    ///     .max_value(10_000)
+    ///     .build()
+    ///     .unwrap();
     pub fn configure() -> Config {
         Config::default()
     }
@@ -426,11 +436,6 @@ impl Histogram {
                 }
             }
         }
-    }
-
-    #[deprecated]
-    pub fn record(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
-        self.increment_by(value, count)
     }
 
     /// decrement the count for a value. This functionality is best
