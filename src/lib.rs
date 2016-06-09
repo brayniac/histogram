@@ -27,10 +27,10 @@
 //!
 //! ```
 //!
-//! use histogram::*;
+//! use histogram::Histogram;
 //!
 //! // create a histogram with default config
-//! let mut histogram = Histogram::new().unwrap();
+//! let mut histogram = Histogram::new();
 //!
 //! let mut value = 0;
 //!
@@ -62,16 +62,16 @@ use std::fmt;
 use std::mem;
 
 #[derive(Clone, Copy)]
-pub struct HistogramConfig {
+pub struct Config {
     precision: u32,
     max_memory: u32,
     max_value: u64,
     radix: u32,
 }
 
-impl Default for HistogramConfig {
-    fn default() -> HistogramConfig {
-        HistogramConfig {
+impl Default for Config {
+    fn default() -> Config {
+        Config {
             precision: 3,
             max_memory: 0,
             max_value: 60_000_000_000,
@@ -80,15 +80,15 @@ impl Default for HistogramConfig {
     }
 }
 
-impl HistogramConfig {
-    /// create a new HistogramConfig with defaults
+impl Config {
+    /// create a new Histogram Config with defaults
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut c = HistogramConfig::new();
-    pub fn new() -> HistogramConfig {
+    /// let mut c = Histogram::configure();
+    pub fn new() -> Config {
         Default::default()
     }
 
@@ -96,11 +96,11 @@ impl HistogramConfig {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut c = HistogramConfig::new();
+    /// let mut c = Histogram::configure();
     /// c.precision(4); // set to 4 significant figures
-    pub fn precision(&mut self, precision: u32) -> &mut Self {
+    pub fn precision(mut self, precision: u32) -> Self {
         self.precision = precision;
         self
     }
@@ -109,11 +109,11 @@ impl HistogramConfig {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut c = HistogramConfig::new();
+    /// let mut c = Histogram::configure();
     /// c.max_memory(1024*1024); // cap Histogram at 1MB of data
-    pub fn max_memory(&mut self, bytes: u32) -> &mut Self {
+    pub fn max_memory(mut self, bytes: u32) -> Self {
         self.max_memory = bytes;
         self
     }
@@ -122,27 +122,31 @@ impl HistogramConfig {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut c = HistogramConfig::new();
+    /// let mut c = Histogram::configure();
     /// c.max_value(1000); // values above 1000 will not be stored
-    pub fn max_value(&mut self, max: u64) -> &mut Self {
+    pub fn max_value(mut self, max: u64) -> Self {
         self.max_value = max;
         self
+    }
+
+    pub fn build(self) -> Option<Histogram> {
+        Histogram::configured(self)
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct HistogramCounters {
+pub struct Counters {
     entries_total: u64,
     missed_unknown: u64,
     missed_small: u64,
     missed_large: u64,
 }
 
-impl Default for HistogramCounters {
-    fn default() -> HistogramCounters {
-        HistogramCounters {
+impl Default for Counters {
+    fn default() -> Counters {
+        Counters {
             entries_total: 0,
             missed_unknown: 0,
             missed_small: 0,
@@ -151,8 +155,8 @@ impl Default for HistogramCounters {
     }
 }
 
-impl HistogramCounters {
-    fn new() -> HistogramCounters {
+impl Counters {
+    fn new() -> Counters {
         Default::default()
     }
 
@@ -166,13 +170,13 @@ impl HistogramCounters {
 }
 
 #[derive(Clone)]
-pub struct HistogramData {
+pub struct Data {
     data: Vec<u64>,
-    counters: HistogramCounters,
+    counters: Counters,
 }
 
 #[derive(Clone, Copy)]
-pub struct HistogramProperties {
+pub struct Properties {
     buckets_inner: u32,
     buckets_outer: u32,
     buckets_total: u32,
@@ -183,26 +187,26 @@ pub struct HistogramProperties {
 
 #[derive(Clone)]
 pub struct Histogram {
-    config: HistogramConfig,
-    data: HistogramData,
-    properties: HistogramProperties,
+    config: Config,
+    data: Data,
+    properties: Properties,
 }
 
 #[derive(Clone, Copy)]
-pub struct HistogramBucket {
+pub struct Bucket {
     value: u64,
     count: u64,
     id: u64,
 }
 
-impl HistogramBucket {
+impl Bucket {
     /// return the sample value for the bucket
     ///
     /// # Example
     /// ```
-    /// use histogram::*;
+    /// use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.value(), 1);
@@ -214,9 +218,9 @@ impl HistogramBucket {
     ///
     /// # Example
     /// ```
-    /// use histogram::*;
+    /// use histogram::Histogram;
     ///
-    /// let h = Histogram::new().unwrap();
+    /// let h = Histogram::new();
     /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.count(), 0);
@@ -228,9 +232,9 @@ impl HistogramBucket {
     ///
     /// # Example
     /// ```
-    /// use histogram::*;
+    /// use histogram::Histogram;
     ///
-    /// let h = Histogram::new().unwrap();
+    /// let h = Histogram::new();
     /// let b = h.into_iter().next().unwrap();
     ///
     /// assert_eq!(b.id(), 0);
@@ -255,15 +259,15 @@ impl<'a> Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = HistogramBucket;
+    type Item = Bucket;
 
-    fn next(&mut self) -> Option<HistogramBucket> {
+    fn next(&mut self) -> Option<Bucket> {
         if self.index == (self.hist.properties.buckets_total as usize) {
             None
         } else {
             let current = self.index;
             self.index += 1;
-            Some(HistogramBucket {
+            Some(Bucket {
                 id: current as u64,
                 value: self.hist.index_value(current),
                 count: self.hist.data.data[current],
@@ -273,7 +277,7 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 impl<'a> IntoIterator for &'a Histogram {
-    type Item = HistogramBucket;
+    type Item = Bucket;
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -292,25 +296,18 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
-    pub fn new() -> Option<Histogram> {
-        let config = HistogramConfig::new();
-        Histogram::configured(config)
+    /// let mut h = Histogram::new();
+    pub fn new() -> Histogram {
+        Config::new().build().unwrap()
     }
 
-    /// create a new Histogram
-    ///
-    /// # Example
-    /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    ///
-    /// let mut c = HistogramConfig::new();
-    ///
-    /// let mut h = Histogram::configured(c).unwrap();
-    pub fn configured(config: HistogramConfig) -> Option<Histogram> {
+    pub fn configure() -> Config {
+        Config::default()
+    }
 
+    fn configured(config: Config) -> Option<Histogram> {
         let buckets_inner: u32 = config.radix.pow(config.precision);
         let linear_power: u32 = 32 - buckets_inner.leading_zeros();
         let linear_max: u64 = 2.0_f64.powi(linear_power as i32) as u64 - 1;
@@ -331,15 +328,15 @@ impl Histogram {
 
         let data = vec![0; buckets_total as usize];
 
-        let counters = HistogramCounters::new();
+        let counters = Counters::new();
 
         Some(Histogram {
             config: config,
-            data: HistogramData {
+            data: Data {
                 data: data,
                 counters: counters,
             },
-            properties: HistogramProperties {
+            properties: Properties {
                 buckets_inner: buckets_inner,
                 buckets_outer: buckets_outer,
                 buckets_total: buckets_total,
@@ -354,9 +351,9 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// h.increment(1);
     /// assert_eq!(h.entries(), 1);
@@ -374,9 +371,9 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// h.increment(1);
     /// assert_eq!(h.get(1).unwrap(), 1);
@@ -388,9 +385,9 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// h.increment_by(1, 1);
     /// assert_eq!(h.get(1).unwrap(), 1);
@@ -435,8 +432,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// h.increment(1).unwrap();
     /// assert_eq!(h.get(1).unwrap(), 1);
@@ -452,8 +449,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// h.increment_by(1, 1).unwrap();
     /// h.increment_by(2, 2).unwrap();
@@ -505,9 +502,9 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// assert_eq!(h.get(1).unwrap(), 0);
     pub fn get(&self, value: u64) -> Option<u64> {
@@ -577,8 +574,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..1000 {
     ///     h.increment(value).unwrap();
@@ -651,7 +648,7 @@ impl Histogram {
     ///
     /// # Example
     /// # use histogram::*;
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..1000 {
     ///     h.increment(value);
@@ -666,7 +663,7 @@ impl Histogram {
     ///
     /// # Example
     /// # use histogram::*;
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..1000 {
     ///     h.increment(value);
@@ -681,8 +678,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..1000 {
     ///     h.increment(value);
@@ -710,8 +707,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..11 {
     ///     h.increment(value);
@@ -745,8 +742,8 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
-    /// let mut h = Histogram::new().unwrap();
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
     ///
     /// for value in 1..11 {
     ///     h.increment(value);
@@ -781,11 +778,11 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram,HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut a = Histogram::new().unwrap();
+    /// let mut a = Histogram::new();
     ///
-    /// let mut b = Histogram::new().unwrap();
+    /// let mut b = Histogram::new();
     ///
     /// assert_eq!(a.entries(), 0);
     /// assert_eq!(b.entries(), 0);
@@ -811,9 +808,9 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram, HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// assert_eq!(h.entries(), 0);
     /// h.increment(1);
@@ -826,25 +823,21 @@ impl Histogram {
     ///
     /// # Example
     /// ```
-    /// # use histogram::{Histogram, HistogramConfig};
+    /// # use histogram::Histogram;
     ///
-    /// let mut h = Histogram::new().unwrap();
+    /// let mut h = Histogram::new();
     ///
     /// assert_eq!(h.buckets_total(), 27023);
     ///
-    /// let mut c = HistogramConfig::new();
-    /// c.max_value(1_000_000_000);
-    /// let mut h = Histogram::configured(c).unwrap();
+    /// let mut h = Histogram::configure().max_value(1_000_000_000).build().unwrap();
     ///
     /// assert_eq!(h.buckets_total(), 21023);
     ///
-    /// c.precision(4);
-    /// let mut h = Histogram::configured(c).unwrap();
+    /// let mut h = Histogram::configure().max_value(1_000_000_000).precision(4).build().unwrap();
     ///
     /// assert_eq!(h.buckets_total(), 176383);
     ///
-    /// c.precision(2);
-    /// let mut h = Histogram::configured(c).unwrap();
+    /// let mut h = Histogram::configure().max_value(1_000_000_000).precision(2).build().unwrap();
     ///
     /// assert_eq!(h.buckets_total(), 2427);
     pub fn buckets_total(&self) -> u64 {
@@ -854,15 +847,15 @@ impl Histogram {
 
 #[cfg(test)]
 mod tests {
-    use super::{Histogram, HistogramConfig};
+    use super::Histogram;
 
     #[test]
     fn test_new_0() {
-        // this histogram has only a linear region which runs 1-15
-
-        let mut c = HistogramConfig::new();
-        c.max_value(10).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(10)
+            .precision(1)
+            .build()
+            .unwrap();
 
         assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
         assert_eq!(h.properties.buckets_outer, 0); // max <= 2 * buckets_inner
@@ -871,11 +864,11 @@ mod tests {
 
     #[test]
     fn test_new_1() {
-        // this histogram has linear and log regios
-
-        let mut c = HistogramConfig::new();
-        c.max_value(31).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(31)
+            .precision(1)
+            .build()
+            .unwrap();
 
         assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
         assert_eq!(h.properties.buckets_outer, 1); // max <= 2 * buckets_inner
@@ -884,9 +877,11 @@ mod tests {
 
     #[test]
     fn test_new_2() {
-        let mut c = HistogramConfig::new();
-        c.max_value(32).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(32)
+            .precision(1)
+            .build()
+            .unwrap();
 
         assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
         assert_eq!(h.properties.buckets_outer, 2); // max <= 2 * buckets_inner
@@ -895,9 +890,11 @@ mod tests {
 
     #[test]
     fn test_new_3() {
-        let mut c = HistogramConfig::new();
-        c.max_value(10_000).precision(3);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(10_000)
+            .precision(3)
+            .build()
+            .unwrap();
 
         assert_eq!(h.properties.buckets_inner, 1000); // 10 ^ precision
         assert_eq!(h.properties.buckets_outer, 4); // max <= 2 * buckets_inner
@@ -906,10 +903,13 @@ mod tests {
 
     #[test]
     fn test_new_4() {
-        let mut c = HistogramConfig::new();
-        c.max_value(10_000).precision(3);
-        c.max_memory(8192);
-        if let Some(_) = Histogram::configured(c) {
+        let h = Histogram::configure()
+            .max_value(10_000)
+            .precision(3)
+            .max_memory(8192)
+            .build();
+
+        if let Some(_) = h {
             panic!("Created histogram which used too much memory");
         }
     }
@@ -917,7 +917,7 @@ mod tests {
 
     #[test]
     fn test_increment_0() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
 
         for op in 1..1000000 {
             h.increment(1).unwrap();
@@ -927,9 +927,11 @@ mod tests {
 
     #[test]
     fn test_increment_1() {
-        let mut c = HistogramConfig::new();
-        c.max_value(10).precision(3);
-        let mut h = Histogram::configured(c).unwrap();
+        let mut h = Histogram::configure()
+            .max_value(10)
+            .precision(3)
+            .build()
+            .unwrap();
 
         // increment values across the entire range
         // including 0 and > max_value
@@ -941,7 +943,7 @@ mod tests {
 
     #[test]
     fn test_decrement_0() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
         let m = 1000000;
 
         for _ in 0..m {
@@ -956,11 +958,14 @@ mod tests {
 
     #[test]
     fn test_decrement_1() {
-        let mut c = HistogramConfig::new();
-        c.max_value(20000).precision(3);
-        let mut h = Histogram::configured(c).unwrap();
+        let mut h = Histogram::configure()
+            .max_value(20_000)
+            .precision(3)
+            .build()
+            .unwrap();
+
         let v = h.properties.linear_max + 2;
-        let m = 1000000;
+        let m = 1_000_000;
 
         for _ in 0..m {
             h.increment(v).unwrap();
@@ -975,14 +980,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "small sample value underflow")]
     fn test_decrement_2() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
         h.decrement(0).unwrap();
     }
 
     #[test]
     #[should_panic(expected = "sample value too small")]
     fn test_decrement_3() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
         let _ = h.increment(0);
         h.decrement(0).unwrap();
     }
@@ -990,7 +995,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "large sample value underflow")]
     fn test_decrement_4() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
         let v = h.config.max_value + 1;
         h.decrement(v).unwrap();
     }
@@ -998,7 +1003,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "sample value too large")]
     fn test_decrement_5() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
         let v = h.config.max_value + 1;
         let _ = h.increment(v);
         h.decrement(v).unwrap();
@@ -1006,7 +1011,7 @@ mod tests {
 
     #[test]
     fn test_decrement_example_0() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
 
         h.increment(1).unwrap();
         assert_eq!(h.get(1).unwrap(), 1);
@@ -1016,7 +1021,7 @@ mod tests {
 
     #[test]
     fn test_decrement_by_example_0() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
 
         h.increment_by(1, 1).unwrap();
         h.increment_by(2, 2).unwrap();
@@ -1028,7 +1033,7 @@ mod tests {
 
     #[test]
     fn test_get() {
-        let mut h = Histogram::new().unwrap();
+        let mut h = Histogram::new();
 
         h.increment(1).unwrap();
         assert_eq!(h.get(1), Some(1));
@@ -1044,9 +1049,11 @@ mod tests {
 
     #[test]
     fn test_get_index_0() {
-        let mut c = HistogramConfig::new();
-        c.max_value(32).precision(3);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(32)
+            .precision(3)
+            .build()
+            .unwrap();
 
         // all values should index directly to (value - 1)
         // no estimated buckets are needed given the precision and max
@@ -1075,9 +1082,11 @@ mod tests {
 
     #[test]
     fn test_get_index_1() {
-        let mut c = HistogramConfig::new();
-        c.max_value(100).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(100)
+            .precision(1)
+            .build()
+            .unwrap();
 
         assert_eq!(h.get_index(1), Some(0));
         assert_eq!(h.get_index(2), Some(1));
@@ -1105,9 +1114,11 @@ mod tests {
     #[test]
     fn test_get_index_2() {
         // extensive test from precomputed table
-        let mut c = HistogramConfig::new();
-        c.max_value(100).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(100)
+            .precision(1)
+            .build()
+            .unwrap();
 
         let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
                      26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
@@ -1135,9 +1146,11 @@ mod tests {
     #[test]
     fn test_get_index_3() {
         // extensive test from precomputed table
-        let mut c = HistogramConfig::new();
-        c.max_value(250).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(250)
+            .precision(1)
+            .build()
+            .unwrap();
 
         let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
                      26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
@@ -1164,9 +1177,11 @@ mod tests {
 
     #[test]
     fn test_index_value_0() {
-        let mut c = HistogramConfig::new();
-        c.max_value(100).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(100)
+            .precision(1)
+            .build()
+            .unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
@@ -1179,9 +1194,11 @@ mod tests {
 
     #[test]
     fn test_index_value_1() {
-        let mut c = HistogramConfig::new();
-        c.max_value(1_000).precision(2);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(1_000)
+            .precision(2)
+            .build()
+            .unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
@@ -1194,9 +1211,11 @@ mod tests {
 
     #[test]
     fn test_index_value_2() {
-        let mut c = HistogramConfig::new();
-        c.max_value(10_000).precision(3);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(10_000)
+            .precision(3)
+            .build()
+            .unwrap();
 
         assert_eq!(h.index_value(0), 1);
         assert_eq!(h.index_value(1), 2);
@@ -1210,9 +1229,11 @@ mod tests {
 
     #[test]
     fn test_iterator() {
-        let mut c = HistogramConfig::new();
-        c.max_value(100).precision(1);
-        let h = Histogram::configured(c).unwrap();
+        let h = Histogram::configure()
+            .max_value(100)
+            .precision(1)
+            .build()
+            .unwrap();
 
         let mut buckets_seen = 0;
         for bucket in &h {
@@ -1226,9 +1247,11 @@ mod tests {
 
     #[test]
     fn test_percentile() {
-        let mut c = HistogramConfig::new();
-        c.max_value(1_000).precision(4);
-        let mut h = Histogram::configured(c).unwrap();
+        let mut h = Histogram::configure()
+            .max_value(1_000)
+            .precision(4)
+            .build()
+            .unwrap();
 
         for i in 100..200 {
             h.increment(i).ok().expect("error");
@@ -1246,9 +1269,11 @@ mod tests {
 
     #[test]
     fn test_percentile_bad() {
-        let mut c = HistogramConfig::new();
-        c.max_value(1_000).precision(4);
-        let mut h = Histogram::configured(c).unwrap();
+        let mut h = Histogram::configure()
+            .max_value(1_000)
+            .precision(4)
+            .build()
+            .unwrap();
 
         let _ = h.increment(5_000);
 
