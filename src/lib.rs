@@ -1,6 +1,6 @@
 //! A native rust implementation of a histogram and percentiles which can offer
 //! specified precision across the full range of stored values. This library is
-//! inspired by the HdrHistogram project.
+//! inspired by the `HdrHistogram` project.
 //!
 //! # Goals
 //! * maintain precision across full value range
@@ -291,6 +291,12 @@ impl fmt::Debug for Histogram {
     }
 }
 
+impl Default for Histogram {
+    fn default() -> Histogram {
+        Config::new().build().unwrap()
+    }
+}
+
 impl Histogram {
     /// create a new Histogram
     ///
@@ -300,7 +306,7 @@ impl Histogram {
     ///
     /// let mut h = Histogram::new();
     pub fn new() -> Histogram {
-        Config::new().build().unwrap()
+        Default::default()
     }
 
     pub fn configure() -> Config {
@@ -625,7 +631,7 @@ impl Histogram {
                 return Err("overflow");
             }
             loop {
-                have = have + self.data.data[index as usize];
+                have += self.data.data[index as usize];
 
                 if have >= need {
                     return Ok(self.index_value(index as usize) as u64);
