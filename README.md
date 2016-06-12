@@ -23,6 +23,9 @@ Then, add this to your crate root:
 extern crate histogram;
 ```
 
+The API documentation of this library can be found at
+[brayniac.github.io/histogram](https://brayniac.github.io/histogram/).
+
 ## Features
 
 * Values are stored with precision guarentees
