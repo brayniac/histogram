@@ -141,7 +141,7 @@ impl Config {
 }
 
 #[derive(Clone, Copy)]
-pub struct Counters {
+struct Counters {
     entries_total: u64,
     missed_unknown: u64,
     missed_small: u64,
@@ -174,13 +174,13 @@ impl Counters {
 }
 
 #[derive(Clone)]
-pub struct Data {
+struct Data {
     data: Vec<u64>,
     counters: Counters,
 }
 
 #[derive(Clone, Copy)]
-pub struct Properties {
+struct Properties {
     buckets_inner: u32,
     buckets_outer: u32,
     buckets_total: u32,
@@ -189,6 +189,7 @@ pub struct Properties {
     linear_power: u32,
 }
 
+/// the main datastructure
 #[derive(Clone)]
 pub struct Histogram {
     config: Config,
@@ -196,6 +197,7 @@ pub struct Histogram {
     properties: Properties,
 }
 
+/// value-quantized section of `Histogram`
 #[derive(Clone, Copy)]
 pub struct Bucket {
     value: u64,
