@@ -200,9 +200,10 @@ pub struct Histogram {
 /// value-quantized section of `Histogram`
 #[derive(Clone, Copy)]
 pub struct Bucket {
-    value: u64,
-    count: u64,
     id: u64,
+    count: u64,
+    value: u64,
+    width: u64,
 }
 
 impl Bucket {
@@ -244,6 +245,19 @@ impl Bucket {
     pub fn id(self) -> u64 {
         self.id
     }
+
+    /// return the width of the bucket
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::Histogram;
+    /// let h = Histogram::new();
+    /// let b = h.into_iter().next().unwrap();
+    /// assert_eq!(b.width(), 1);
+    /// ```
+    pub fn width(self) -> u64 {
+        self.width
+    }
 }
 
 /// Iterator over a Histogram's buckets.
@@ -270,10 +284,17 @@ impl<'a> Iterator for Iter<'a> {
         } else {
             let current = self.index;
             self.index += 1;
+            let value = self.hist.index_value(current);
+            let width = if current == 0 {
+                1
+            } else {
+                value - self.hist.index_value(current - 1)
+            };
             Some(Bucket {
                 id: current as u64,
-                value: self.hist.index_value(current),
                 count: self.hist.data.data[current],
+                value: value,
+                width: width,
             })
         }
     }
