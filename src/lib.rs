@@ -198,7 +198,7 @@ pub struct Histogram {
 }
 
 /// value-quantized section of `Histogram`
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Bucket {
     id: u64,
     count: u64,
@@ -279,17 +279,26 @@ impl<'a> Iterator for Iter<'a> {
     type Item = Bucket;
 
     fn next(&mut self) -> Option<Bucket> {
-        if self.index == (self.hist.properties.buckets_total as usize) {
+        let limit = self.hist.get_index(self.hist.config.max_value).unwrap();
+        if self.index > limit {
             None
         } else {
             let current = self.index;
-            self.index += 1;
-            let value = self.hist.index_value(current);
+
+            // clamp the value at max value
+            let mut value = self.hist.index_value(current);
+            if value > self.hist.config.max_value {
+                value = self.hist.config.max_value;
+                self.index = limit + 1;
+            }
+
+            // measure width of current bucket
             let width = if current == 0 {
                 1
             } else {
                 value - self.hist.index_value(current - 1)
             };
+            self.index += 1;
             Some(Bucket {
                 id: current as u64,
                 count: self.hist.data.data[current],
@@ -350,7 +359,7 @@ impl Histogram {
     fn configured(config: Config) -> Option<Histogram> {
         let buckets_inner: u32 = config.radix.pow(config.precision);
         let linear_power: u32 = 32 - buckets_inner.leading_zeros();
-        let linear_max: u64 = 2.0_f64.powi(linear_power as i32) as u64 - 1;
+        let linear_max: u64 = 2.0_f64.powi(linear_power as i32) as u64;
         let max_value_power: u32 = 64 - config.max_value.leading_zeros();
 
         let mut buckets_outer = 0;
@@ -500,8 +509,10 @@ impl Histogram {
         if value < 1 {
             if let Some(new_missed_small) = self.data.counters.missed_small.checked_sub(count) {
                 self.data.counters.missed_small = new_missed_small;
-                self.data.counters.entries_total =
-                    self.data.counters.entries_total.saturating_sub(count);
+                self.data.counters.entries_total = self.data
+                    .counters
+                    .entries_total
+                    .saturating_sub(count);
                 Err("sample value too small")
             } else {
                 Err("small sample value underflow")
@@ -509,8 +520,10 @@ impl Histogram {
         } else if value > self.config.max_value {
             if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
                 self.data.counters.missed_large = new_missed_large;
-                self.data.counters.entries_total =
-                    self.data.counters.entries_total.saturating_sub(count);
+                self.data.counters.entries_total = self.data
+                    .counters
+                    .entries_total
+                    .saturating_sub(count);
                 Err("sample value too large")
             } else {
                 Err("large sample value underflow")
@@ -520,16 +533,20 @@ impl Histogram {
                 Some(index) => {
                     if let Some(new_index_value) = self.data.data[index].checked_sub(count) {
                         self.data.data[index] = new_index_value;
-                        self.data.counters.entries_total =
-                            self.data.counters.entries_total.saturating_sub(count);
+                        self.data.counters.entries_total = self.data
+                            .counters
+                            .entries_total
+                            .saturating_sub(count);
                         Ok(())
                     } else {
                         Err("underflow")
                     }
                 }
                 None => {
-                    self.data.counters.missed_unknown =
-                        self.data.counters.missed_unknown.saturating_add(count);
+                    self.data.counters.missed_unknown = self.data
+                        .counters
+                        .missed_unknown
+                        .saturating_add(count);
                     Err("sample unknown error")
                 }
             }
@@ -557,17 +574,17 @@ impl Histogram {
 
         if value >= 1 {
 
-            if value <= self.properties.linear_max {
+            if value <= (self.properties.linear_max + 2_u64.pow(self.config.precision)) {
                 return Some((value - 1) as usize);
             }
 
             let l_max = self.properties.linear_max as u32;
 
-            let outer = 63 - value.leading_zeros();
+            let outer = 63 - (value - 1).leading_zeros();
 
-            let l_power = 64 - self.properties.linear_max.leading_zeros();
+            let l_power = 63 - self.properties.linear_max.leading_zeros();
 
-            let remain = value as f64 - 2.0_f64.powi(outer as i32);
+            let remain = (value - 1) as f64 - 2.0_f64.powi(outer as i32);
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
                          2.0_f64.powi((outer) as i32))
@@ -576,7 +593,7 @@ impl Histogram {
             // this gives the shifted outer index
             let outer = outer as u32 - l_power;
 
-            let index = l_max + self.properties.buckets_inner * outer + inner;
+            let index = l_max + self.properties.buckets_inner * outer + inner + 1;
 
             return Some(index as usize);
         }
@@ -585,13 +602,12 @@ impl Histogram {
 
     // calculate the nominal value of the given index
     fn index_value(&self, index: usize) -> u64 {
-
         // in this case, the index is linear
         let index = index as u32;
 
         let linear_max = self.properties.linear_max as u32;
 
-        if index < linear_max {
+        if index <= linear_max {
             return (index + 1) as u64;
         }
 
@@ -604,6 +620,9 @@ impl Histogram {
         let mut value = 2.0_f64.powi((outer as u32 + self.properties.linear_power) as i32);
         value += inner as f64 * (value as f64 / self.properties.buckets_inner as f64);
 
+        if value > self.config.max_value as f64 {
+            return self.config.max_value as u64;
+        }
         value.ceil() as u64
     }
 
@@ -623,7 +642,6 @@ impl Histogram {
     /// assert_eq!(h.percentile(99.9).unwrap(), 999);
     /// ```
     pub fn percentile(&self, percentile: f64) -> Result<u64, &'static str> {
-
         if self.entries() < 1 {
             return Err("no data");
         }
@@ -861,22 +879,10 @@ impl Histogram {
     /// # use histogram::Histogram;
     /// let mut h = Histogram::new();
     ///
-    /// assert_eq!(h.buckets_total(), 27023);
-    ///
-    /// let mut h = Histogram::configure().max_value(1_000_000_000).build().unwrap();
-    ///
-    /// assert_eq!(h.buckets_total(), 21023);
-    ///
-    /// let mut h = Histogram::configure().max_value(1_000_000_000).precision(4).build().unwrap();
-    ///
-    /// assert_eq!(h.buckets_total(), 176383);
-    ///
-    /// let mut h = Histogram::configure().max_value(1_000_000_000).precision(2).build().unwrap();
-    ///
-    /// assert_eq!(h.buckets_total(), 2427);
+    /// assert!(h.buckets_total() > 1);
     /// ```
     pub fn buckets_total(&self) -> u64 {
-        self.properties.buckets_total as u64
+        (self.get_index(self.config.max_value).unwrap() + 1) as u64
     }
 }
 
@@ -885,59 +891,7 @@ mod tests {
     use super::Histogram;
 
     #[test]
-    fn test_new_0() {
-        let h = Histogram::configure()
-            .max_value(10)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
-        assert_eq!(h.properties.buckets_outer, 0); // max <= 2 * buckets_inner
-        assert_eq!(h.properties.buckets_total, 15); // only linear region
-    }
-
-    #[test]
-    fn test_new_1() {
-        let h = Histogram::configure()
-            .max_value(31)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
-        assert_eq!(h.properties.buckets_outer, 1); // max <= 2 * buckets_inner
-        assert_eq!(h.properties.buckets_total, 25); // only linear region
-    }
-
-    #[test]
-    fn test_new_2() {
-        let h = Histogram::configure()
-            .max_value(32)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        assert_eq!(h.properties.buckets_inner, 10); // 10 ^ precision
-        assert_eq!(h.properties.buckets_outer, 2); // max <= 2 * buckets_inner
-        assert_eq!(h.properties.buckets_total, 35); // only linear region
-    }
-
-    #[test]
-    fn test_new_3() {
-        let h = Histogram::configure()
-            .max_value(10_000)
-            .precision(3)
-            .build()
-            .unwrap();
-
-        assert_eq!(h.properties.buckets_inner, 1000); // 10 ^ precision
-        assert_eq!(h.properties.buckets_outer, 4); // max <= 2 * buckets_inner
-        assert_eq!(h.properties.buckets_total, 5023); // only linear region
-    }
-
-    #[test]
-    fn test_new_4() {
+    fn test_too_large() {
         let h = Histogram::configure()
             .max_value(10_000)
             .precision(3)
@@ -1116,101 +1070,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_index_1() {
-        let h = Histogram::configure()
-            .max_value(100)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        assert_eq!(h.get_index(1), Some(0));
-        assert_eq!(h.get_index(2), Some(1));
-        assert_eq!(h.get_index(15), Some(14));
-
-        // powers of two are 10 apart from value = 16 and up
-        assert_eq!(h.get_index(16), Some(15));
-        assert_eq!(h.get_index(32), Some(25));
-        assert_eq!(h.get_index(64), Some(35));
-
-        // this tests that rounding up within inner bucket works
-        assert_eq!(h.get_index(16), Some(15));
-        assert_eq!(h.get_index(17), Some(15));
-        assert_eq!(h.get_index(18), Some(16));
-        assert_eq!(h.get_index(19), Some(16));
-
-        // these values prove roll-up into next outer bucket works
-        assert_eq!(h.get_index(62), Some(34));
-        assert_eq!(h.get_index(63), Some(34));
-        assert_eq!(h.get_index(64), Some(35));
-
-        assert_eq!(h.get_index(65), Some(35));
-    }
-
-    #[test]
-    fn test_get_index_2() {
-        // extensive test from precomputed table
-        let h = Histogram::configure()
-            .max_value(100)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
-                     26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
-                     96, 103, 109, 116, 122];
-
-        for index in 0..45 {
-            let got = h.get_index(v[index]).unwrap();
-            assert!(got == index,
-                    "Value: {} Got: {} Want: {}",
-                    v[index],
-                    got,
-                    index);
-        }
-
-        for index in 0..45 {
-            let got = h.index_value(index);
-            assert!(got == v[index],
-                    "Index: {} Got: {} Want: {}",
-                    index,
-                    got,
-                    v[index]);
-        }
-    }
-
-    #[test]
-    fn test_get_index_3() {
-        // extensive test from precomputed table
-        let h = Histogram::configure()
-            .max_value(250)
-            .precision(1)
-            .build()
-            .unwrap();
-
-        let v = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24,
-                     26, 28, 29, 31, 32, 36, 39, 42, 45, 48, 52, 55, 58, 61, 64, 71, 77, 84, 90,
-                     96, 103, 109, 116, 122, 128, 141, 154, 167, 180, 192, 205, 218, 231, 244];
-
-        for index in 0..55 {
-            let got = h.get_index(v[index]).unwrap();
-            assert!(got == index,
-                    "Value: {} Got: {} Want: {}",
-                    v[index],
-                    got,
-                    index);
-        }
-
-        for index in 0..55 {
-            let got = h.index_value(index);
-            assert!(got == v[index],
-                    "Index: {} Got: {} Want: {}",
-                    index,
-                    got,
-                    v[index]);
-        }
-    }
-
-    #[test]
     fn test_index_value_0() {
         let h = Histogram::configure()
             .max_value(100)
@@ -1223,8 +1082,8 @@ mod tests {
         assert_eq!(h.index_value(14), 15);
 
         assert_eq!(h.index_value(15), 16);
-        assert_eq!(h.index_value(25), 32);
-        assert_eq!(h.index_value(35), 64);
+        assert_eq!(h.index_value(25), 31);
+        assert_eq!(h.index_value(35), 61);
     }
 
     #[test]
@@ -1240,8 +1099,8 @@ mod tests {
         assert_eq!(h.index_value(126), 127);
 
         assert_eq!(h.index_value(127), 128);
-        assert_eq!(h.index_value(227), 256);
-        assert_eq!(h.index_value(327), 512);
+        assert_eq!(h.index_value(227), 255);
+        assert_eq!(h.index_value(327), 510);
     }
 
     #[test]
@@ -1257,9 +1116,7 @@ mod tests {
         assert_eq!(h.index_value(1022), 1023);
 
         assert_eq!(h.index_value(1023), 1024);
-        assert_eq!(h.index_value(2023), 2048);
-        assert_eq!(h.index_value(3023), 4096);
-        assert_eq!(h.index_value(4023), 8192);
+        assert_eq!(h.index_value(2023), 2047);
     }
 
     #[test]
@@ -1272,6 +1129,7 @@ mod tests {
 
         let mut buckets_seen = 0;
         for bucket in &h {
+            println!("Bucket: {:?}", bucket);
             assert_eq!(bucket.id(), buckets_seen);
             assert_eq!(bucket.value(), h.index_value(bucket.id() as usize));
             assert_eq!(bucket.count(), 0);
@@ -1324,5 +1182,81 @@ mod tests {
         let _ = h.increment(500);
 
         assert!(h.percentile(50.0).is_ok());
+    }
+
+    #[test]
+    fn test_width_1() {
+        let mut h = Histogram::configure()
+            .max_value(100)
+            .precision(1)
+            .build()
+            .unwrap();
+
+        for v in 1..101 {
+            let _ = h.increment(v);
+        }
+
+        assert_eq!(h.data.counters.missed_large, 0);
+
+        let mut prev_id = 0;
+        for b in &h {
+            println!("Bucket: {:?}", b);
+            if b.id() >= 1 {
+                assert!(b.id() - 1 == prev_id);
+                prev_id = b.id();
+            }
+            assert!(b.width() != 0, "width should not be 0");
+            assert_eq!(b.width(), b.count());
+        }
+    }
+    #[test]
+    fn test_width_2() {
+        let mut h = Histogram::configure()
+            .max_value(1000)
+            .precision(2)
+            .build()
+            .unwrap();
+
+        for v in 1..1001 {
+            let _ = h.increment(v);
+        }
+
+        assert_eq!(h.data.counters.missed_large, 0);
+
+        let mut prev_id = 0;
+        for b in &h {
+            println!("Bucket: {:?}", b);
+            if b.id() >= 1 {
+                assert!(b.id() - 1 == prev_id);
+                prev_id = b.id();
+            }
+            assert!(b.width() != 0, "width should not be 0");
+            assert_eq!(b.width(), b.count());
+        }
+    }
+    #[test]
+    fn test_width_3() {
+        let mut h = Histogram::configure()
+            .max_value(10_000)
+            .precision(3)
+            .build()
+            .unwrap();
+
+        for v in 0..10_000 {
+            let _ = h.increment(v + 1);
+        }
+
+        assert_eq!(h.data.counters.missed_large, 0);
+
+        let mut prev_id = 0;
+        for b in &h {
+            println!("Bucket: {:?}", b);
+            if b.id() >= 1 {
+                assert!(b.id() - 1 == prev_id);
+                prev_id = b.id();
+            }
+            assert!(b.width() != 0, "width should not be 0");
+            assert_eq!(b.width(), b.count());
+        }
     }
 }

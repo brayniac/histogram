@@ -8,11 +8,3 @@ os:
 - linux
 - osx
 after_success: sh scripts/travis-doc-upload.sh
-before_script:
-  - cargo install --force rustfmt
-  - export PATH=$PATH:~/.cargo/bin
-script:
-- |
-  cargo fmt -- --write-mode=diff &&
-  cargo build &&
-  cargo test
