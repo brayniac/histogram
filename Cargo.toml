@@ -14,3 +14,5 @@ repository = "https://github.com/brayniac/histogram"
 readme = "README.md"
 
 keywords = [ "histogram", "percentile", "statistics", "stats" ]
+
+categories = [ "data-structures" ]
