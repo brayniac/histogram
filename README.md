@@ -24,7 +24,7 @@ extern crate histogram;
 ```
 
 The API documentation of this library can be found at
-[brayniac.github.io/histogram](https://brayniac.github.io/histogram/).
+[docs.rs/histogram](https://docs.rs/histogram/).
 
 ## Features
 
