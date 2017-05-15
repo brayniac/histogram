@@ -182,9 +182,6 @@ struct Data {
 #[derive(Clone, Copy)]
 struct Properties {
     buckets_inner: u32,
-    buckets_outer: u32,
-    buckets_total: u32,
-    memory_used: u32,
     linear_max: u64,
     linear_power: u32,
 }
@@ -300,11 +297,11 @@ impl<'a> Iterator for Iter<'a> {
             };
             self.index += 1;
             Some(Bucket {
-                id: current as u64,
-                count: self.hist.data.data[current],
-                value: value,
-                width: width,
-            })
+                     id: current as u64,
+                     count: self.hist.data.data[current],
+                     value: value,
+                     width: width,
+                 })
         }
     }
 }
@@ -362,11 +359,11 @@ impl Histogram {
         let linear_max: u64 = 2.0_f64.powi(linear_power as i32) as u64;
         let max_value_power: u32 = 64 - config.max_value.leading_zeros();
 
-        let mut buckets_outer = 0;
-
-        if max_value_power > linear_power {
-            buckets_outer = max_value_power - linear_power;
-        }
+        let buckets_outer = if max_value_power > linear_power {
+            max_value_power - linear_power
+        } else {
+            0
+        };
 
         let buckets_total = buckets_inner * buckets_outer + linear_max as u32;
         let memory_used = buckets_total * mem::size_of::<u64>() as u32;
@@ -380,20 +377,17 @@ impl Histogram {
         let counters = Counters::new();
 
         Some(Histogram {
-            config: config,
-            data: Data {
-                data: data,
-                counters: counters,
-            },
-            properties: Properties {
-                buckets_inner: buckets_inner,
-                buckets_outer: buckets_outer,
-                buckets_total: buckets_total,
-                memory_used: memory_used,
-                linear_max: linear_max,
-                linear_power: linear_power,
-            },
-        })
+                 config: config,
+                 data: Data {
+                     data: data,
+                     counters: counters,
+                 },
+                 properties: Properties {
+                     buckets_inner: buckets_inner,
+                     linear_max: linear_max,
+                     linear_power: linear_power,
+                 },
+             })
     }
 
     /// clear the histogram data
@@ -462,10 +456,8 @@ impl Histogram {
                     Ok(())
                 }
                 None => {
-                    self.data.counters.missed_unknown = self.data
-                        .counters
-                        .missed_unknown
-                        .saturating_add(count);
+                    self.data.counters.missed_unknown =
+                        self.data.counters.missed_unknown.saturating_add(count);
                     Err("sample unknown error")
                 }
             }
@@ -509,10 +501,8 @@ impl Histogram {
         if value < 1 {
             if let Some(new_missed_small) = self.data.counters.missed_small.checked_sub(count) {
                 self.data.counters.missed_small = new_missed_small;
-                self.data.counters.entries_total = self.data
-                    .counters
-                    .entries_total
-                    .saturating_sub(count);
+                self.data.counters.entries_total =
+                    self.data.counters.entries_total.saturating_sub(count);
                 Err("sample value too small")
             } else {
                 Err("small sample value underflow")
@@ -520,10 +510,8 @@ impl Histogram {
         } else if value > self.config.max_value {
             if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
                 self.data.counters.missed_large = new_missed_large;
-                self.data.counters.entries_total = self.data
-                    .counters
-                    .entries_total
-                    .saturating_sub(count);
+                self.data.counters.entries_total =
+                    self.data.counters.entries_total.saturating_sub(count);
                 Err("sample value too large")
             } else {
                 Err("large sample value underflow")
@@ -533,20 +521,16 @@ impl Histogram {
                 Some(index) => {
                     if let Some(new_index_value) = self.data.data[index].checked_sub(count) {
                         self.data.data[index] = new_index_value;
-                        self.data.counters.entries_total = self.data
-                            .counters
-                            .entries_total
-                            .saturating_sub(count);
+                        self.data.counters.entries_total =
+                            self.data.counters.entries_total.saturating_sub(count);
                         Ok(())
                     } else {
                         Err("underflow")
                     }
                 }
                 None => {
-                    self.data.counters.missed_unknown = self.data
-                        .counters
-                        .missed_unknown
-                        .saturating_add(count);
+                    self.data.counters.missed_unknown =
+                        self.data.counters.missed_unknown.saturating_add(count);
                     Err("sample unknown error")
                 }
             }
@@ -588,7 +572,7 @@ impl Histogram {
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
                          2.0_f64.powi((outer) as i32))
-                .floor() as u32;
+                    .floor() as u32;
 
             // this gives the shifted outer index
             let outer = outer as u32 - l_power;
@@ -660,14 +644,15 @@ impl Histogram {
 
             let mut index: isize = (self.buckets_total() - 1) as isize;
             let mut step: isize = -1 as isize;
-            let mut have: u64 = self.data.counters.missed_large;
 
-            if percentile < 50.0 {
+            let mut have = if percentile < 50.0 {
                 index = 0 as isize;
                 step = 1 as isize;
                 need = total - need;
-                have = self.data.counters.missed_small;
-            }
+                self.data.counters.missed_small
+            } else {
+                self.data.counters.missed_large
+            };
 
             if need == 0 {
                 need = 1;
