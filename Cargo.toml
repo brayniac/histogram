@@ -3,7 +3,7 @@ name = "histogram"
 version = "0.6.6-pre"
 authors = ["Brian Martin <brayniac@gmail.com>"]
 
-license = "MIT OR Apache-2.0"
+license = "MIT/Apache-2.0"
 
 description = "histogram storage and percentile metrics with precision guarentees"
 

@@ -4,9 +4,15 @@ histogram is a stats library for rust which provides histogram
 storage with percentile stats. Maintains precision guarentees
 throughout the range of stored values.
 
-[![Build Status](https://travis-ci.org/brayniac/histogram.svg?branch=master)](https://travis-ci.org/brayniac/histogram)
-[![crates.io](http://meritbadge.herokuapp.com/histogram)](https://crates.io/crates/histogram)
-[![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
+[![travis-badge][]][travis] [![downloads-badge][] ![release-badge][]][crate] [![license-badge][]](#license)
+
+[travis-badge]: https://img.shields.io/travis/brayniac/histogram/master.svg
+[downloads-badge]: https://img.shields.io/crates/d/histogram.svg
+[release-badge]: https://img.shields.io/crates/v/histogram.svg
+[license-badge]: https://img.shields.io/crates/l/histogram.svg
+[travis]: https://travis-ci.org/brayniac/histogram
+[crate]: https://crates.io/crates/histogram
+[Cargo]: https://github.com/rust-lang/cargo
 
 ## Usage
 
