@@ -54,9 +54,7 @@
 //! );
 //! ```
 
-#![crate_type = "lib"]
-
-#![crate_name = "histogram"]
+#![deny(warnings)]
 
 use std::fmt;
 use std::mem;
