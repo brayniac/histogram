@@ -570,7 +570,7 @@ impl Histogram {
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
                          2.0_f64.powi((outer) as i32))
-                    .floor() as u32;
+                .floor() as u32;
 
             // this gives the shifted outer index
             let outer = outer as u32 - l_power;
