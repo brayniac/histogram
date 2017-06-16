@@ -295,11 +295,11 @@ impl<'a> Iterator for Iter<'a> {
             };
             self.index += 1;
             Some(Bucket {
-                     id: current as u64,
-                     count: self.hist.data.data[current],
-                     value: value,
-                     width: width,
-                 })
+                id: current as u64,
+                count: self.hist.data.data[current],
+                value: value,
+                width: width,
+            })
         }
     }
 }
@@ -375,17 +375,17 @@ impl Histogram {
         let counters = Counters::new();
 
         Some(Histogram {
-                 config: config,
-                 data: Data {
-                     data: data,
-                     counters: counters,
-                 },
-                 properties: Properties {
-                     buckets_inner: buckets_inner,
-                     linear_max: linear_max,
-                     linear_power: linear_power,
-                 },
-             })
+            config: config,
+            data: Data {
+                data: data,
+                counters: counters,
+            },
+            properties: Properties {
+                buckets_inner: buckets_inner,
+                linear_max: linear_max,
+                linear_power: linear_power,
+            },
+        })
     }
 
     /// clear the histogram data
@@ -569,7 +569,7 @@ impl Histogram {
             let remain = (value - 1) as f64 - 2.0_f64.powi(outer as i32);
 
             let inner = (self.properties.buckets_inner as f64 * remain as f64 /
-                         2.0_f64.powi((outer) as i32))
+                             2.0_f64.powi((outer) as i32))
                 .floor() as u32;
 
             // this gives the shifted outer index
@@ -735,7 +735,7 @@ impl Histogram {
 
         for index in 0..(self.buckets_total() as usize) {
             mean += (self.index_value(index) as f64 * self.data.data[index] as f64) as f64 /
-                    total as f64;
+                total as f64;
         }
         Ok(mean.ceil() as u64)
     }
