@@ -54,7 +54,8 @@
 //! );
 //! ```
 
-#![deny(warnings)]
+#![cfg_attr(feature = "cargo-clippy", deny(missing_docs))]
+#![cfg_attr(feature = "cargo-clippy", deny(warnings))]
 
 use std::fmt;
 use std::mem;
@@ -568,7 +569,7 @@ impl Histogram {
 
             let remain = (value - 1) as f64 - 2.0_f64.powi(outer as i32);
 
-            let inner = (self.properties.buckets_inner as f64 * remain as f64 /
+            let inner = (f64::from(self.properties.buckets_inner) * remain as f64 /
                              2.0_f64.powi((outer) as i32))
                 .floor() as u32;
 
@@ -590,17 +591,18 @@ impl Histogram {
         let linear_max = self.properties.linear_max as u32;
 
         if index <= linear_max {
-            return (index + 1) as u64;
+            return u64::from(index + 1);
         }
 
         let log_index = index - linear_max;
 
-        let outer = (log_index as f64 / self.properties.buckets_inner as f64).floor() as u32;
+        let outer = (f64::from(log_index) / f64::from(self.properties.buckets_inner)).floor() as
+            u32;
 
         let inner = log_index - outer * self.properties.buckets_inner as u32;
 
         let mut value = 2.0_f64.powi((outer as u32 + self.properties.linear_power) as i32);
-        value += inner as f64 * (value as f64 / self.properties.buckets_inner as f64);
+        value += f64::from(inner) * (value as f64 / f64::from(self.properties.buckets_inner));
 
         if value > self.config.max_value as f64 {
             return self.config.max_value as u64;
