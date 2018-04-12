@@ -143,7 +143,6 @@ impl Config {
 struct Counters {
     entries_total: u64,
     missed_unknown: u64,
-    missed_small: u64,
     missed_large: u64,
 }
 
@@ -152,7 +151,6 @@ impl Default for Counters {
         Counters {
             entries_total: 0,
             missed_unknown: 0,
-            missed_small: 0,
             missed_large: 0,
         }
     }
@@ -166,7 +164,6 @@ impl Counters {
     fn clear(&mut self) -> &mut Self {
         self.entries_total = 0;
         self.missed_unknown = 0;
-        self.missed_small = 0;
         self.missed_large = 0;
         self
     }
@@ -265,7 +262,7 @@ pub struct Iter<'a> {
 impl<'a> Iter<'a> {
     fn new(hist: &'a Histogram) -> Iter<'a> {
         Iter {
-            hist: hist,
+            hist,
             index: 0,
         }
     }
@@ -298,8 +295,8 @@ impl<'a> Iterator for Iter<'a> {
             Some(Bucket {
                 id: current as u64,
                 count: self.hist.data.data[current],
-                value: value,
-                width: width,
+                value,
+                width,
             })
         }
     }
@@ -376,15 +373,15 @@ impl Histogram {
         let counters = Counters::new();
 
         Some(Histogram {
-            config: config,
+            config,
             data: Data {
-                data: data,
-                counters: counters,
+                data,
+                counters,
             },
             properties: Properties {
-                buckets_inner: buckets_inner,
-                linear_max: linear_max,
-                linear_power: linear_power,
+                buckets_inner,
+                linear_max,
+                linear_power,
             },
         })
     }
@@ -632,7 +629,7 @@ impl Histogram {
                 index = 0 as isize;
                 step = 1 as isize;
                 need = total - need;
-                self.data.counters.missed_small
+                0
             } else {
                 self.data.counters.missed_large
             };
