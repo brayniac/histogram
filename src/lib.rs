@@ -210,7 +210,7 @@ impl Bucket {
     /// # use histogram::Histogram;
     /// let mut h = Histogram::new();
     /// let b = h.into_iter().next().unwrap();
-    /// assert_eq!(b.value(), 1);
+    /// assert_eq!(b.value(), 0);
     /// ```
     pub fn value(self) -> u64 {
         self.value
@@ -442,10 +442,7 @@ impl Histogram {
     /// ```
     pub fn increment_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
         self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(count);
-        if value < 1 {
-            self.data.counters.missed_small = self.data.counters.missed_small.saturating_add(count);
-            Err("sample value too small")
-        } else if value > self.config.max_value {
+        if value > self.config.max_value {
             self.data.counters.missed_large = self.data.counters.missed_large.saturating_add(count);
             Err("sample value too large")
         } else {
@@ -497,16 +494,7 @@ impl Histogram {
     /// assert_eq!(h.get(1).unwrap(), 0);
     /// ```
     pub fn decrement_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
-        if value < 1 {
-            if let Some(new_missed_small) = self.data.counters.missed_small.checked_sub(count) {
-                self.data.counters.missed_small = new_missed_small;
-                self.data.counters.entries_total =
-                    self.data.counters.entries_total.saturating_sub(count);
-                Err("sample value too small")
-            } else {
-                Err("small sample value underflow")
-            }
-        } else if value > self.config.max_value {
+        if value > self.config.max_value {
             if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
                 self.data.counters.missed_large = new_missed_large;
                 self.data.counters.entries_total =
@@ -553,34 +541,29 @@ impl Histogram {
 
     // calculate the index for a given value
     fn get_index(&self, value: u64) -> Option<usize> {
-        let result: Option<usize> = None;
-
-        if value >= 1 {
-
-            if value <= (self.properties.linear_max + 2_u64.pow(self.config.precision)) {
-                return Some((value - 1) as usize);
-            }
-
-            let l_max = self.properties.linear_max as u32;
-
-            let outer = 63 - (value - 1).leading_zeros();
-
-            let l_power = 63 - self.properties.linear_max.leading_zeros();
-
-            let remain = (value - 1) as f64 - 2.0_f64.powi(outer as i32);
-
-            let inner = (f64::from(self.properties.buckets_inner) * remain as f64 /
-                             2.0_f64.powi((outer) as i32))
-                .floor() as u32;
-
-            // this gives the shifted outer index
-            let outer = outer as u32 - l_power;
-
-            let index = l_max + self.properties.buckets_inner * outer + inner + 1;
-
-            return Some(index as usize);
+        if value <= (self.properties.linear_max + 2_u64.pow(self.config.precision)) {
+            return Some(value as usize);
         }
-        result
+
+        let l_max = self.properties.linear_max as u32;
+
+        let outer = 63 - value.leading_zeros();
+
+        let l_power = 63 - self.properties.linear_max.leading_zeros();
+
+        let remain = value as f64 - 2.0_f64.powi(outer as i32);
+
+        let inner = (f64::from(self.properties.buckets_inner) * remain as f64 /
+                         2.0_f64.powi((outer) as i32))
+            .floor() as u32;
+
+        // this gives the shifted outer index
+        let outer = outer as u32 - l_power;
+
+        let index = l_max + self.properties.buckets_inner * outer + inner + 1;
+
+        Some(index as usize)
+
     }
 
     // calculate the nominal value of the given index
@@ -591,7 +574,7 @@ impl Histogram {
         let linear_max = self.properties.linear_max as u32;
 
         if index <= linear_max {
-            return u64::from(index + 1);
+            return u64::from(index);
         }
 
         let log_index = index - linear_max;
@@ -908,10 +891,10 @@ mod tests {
             .unwrap();
 
         // increment values across the entire range
-        // including 0 and > max_value
-        for v in 1..11 {
+        // including 0 and max_value
+        for v in 0..11 {
             h.increment(v).unwrap();
-            assert_eq!(h.entries(), v);
+            assert_eq!(h.entries(), v + 1);
         }
     }
 
@@ -949,21 +932,6 @@ mod tests {
             h.decrement(v).unwrap();
             assert_eq!(h.entries(), m - op);
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "small sample value underflow")]
-    fn test_decrement_2() {
-        let mut h = Histogram::new();
-        h.decrement(0).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "sample value too small")]
-    fn test_decrement_3() {
-        let mut h = Histogram::new();
-        let _ = h.increment(0);
-        h.decrement(0).unwrap();
     }
 
     #[test]
@@ -1029,29 +997,12 @@ mod tests {
             .build()
             .unwrap();
 
-        // all values should index directly to (value - 1)
+        // all values should index directly to value
         // no estimated buckets are needed given the precision and max
-
-        assert_eq!(h.get_index(1), Some(0));
-        assert_eq!(h.index_value(0), 1);
-
-        assert_eq!(h.get_index(2), Some(1));
-        assert_eq!(h.index_value(1), 2);
-
-        assert_eq!(h.get_index(3), Some(2));
-        assert_eq!(h.index_value(2), 3);
-
-        assert_eq!(h.get_index(4), Some(3));
-        assert_eq!(h.index_value(3), 4);
-
-        assert_eq!(h.get_index(5), Some(4));
-        assert_eq!(h.index_value(4), 5);
-
-        assert_eq!(h.get_index(16), Some(15));
-        assert_eq!(h.index_value(15), 16);
-
-        assert_eq!(h.get_index(32), Some(31));
-        assert_eq!(h.index_value(31), 32);
+        for i in 0..32 {
+            assert_eq!(h.get_index(i), Some(i as usize));
+            assert_eq!(h.index_value(i as usize), i);
+        }
     }
 
     #[test]
@@ -1062,13 +1013,13 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(h.index_value(0), 1);
-        assert_eq!(h.index_value(1), 2);
-        assert_eq!(h.index_value(14), 15);
+        assert_eq!(h.index_value(1), 1);
+        assert_eq!(h.index_value(2), 2);
+        assert_eq!(h.index_value(15), 15);
 
-        assert_eq!(h.index_value(15), 16);
-        assert_eq!(h.index_value(25), 31);
-        assert_eq!(h.index_value(35), 61);
+        assert_eq!(h.index_value(16), 16);
+        assert_eq!(h.index_value(26), 32);
+        assert_eq!(h.index_value(36), 64);
     }
 
     #[test]
@@ -1079,13 +1030,13 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(h.index_value(0), 1);
-        assert_eq!(h.index_value(1), 2);
-        assert_eq!(h.index_value(126), 127);
+        assert_eq!(h.index_value(0), 0);
+        assert_eq!(h.index_value(1), 1);
+        assert_eq!(h.index_value(126), 126);
 
-        assert_eq!(h.index_value(127), 128);
-        assert_eq!(h.index_value(227), 255);
-        assert_eq!(h.index_value(327), 510);
+        assert_eq!(h.index_value(128), 128);
+        assert_eq!(h.index_value(228), 256);
+        assert_eq!(h.index_value(328), 512);
     }
 
     #[test]
@@ -1096,12 +1047,12 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(h.index_value(0), 1);
-        assert_eq!(h.index_value(1), 2);
-        assert_eq!(h.index_value(1022), 1023);
+        assert_eq!(h.index_value(0), 0);
+        assert_eq!(h.index_value(1), 1);
+        assert_eq!(h.index_value(1023), 1023);
 
-        assert_eq!(h.index_value(1023), 1024);
-        assert_eq!(h.index_value(2023), 2047);
+        assert_eq!(h.index_value(1024), 1024);
+        assert_eq!(h.index_value(2024), 2048);
     }
 
     #[test]
@@ -1173,11 +1124,11 @@ mod tests {
     fn test_width_1() {
         let mut h = Histogram::configure()
             .max_value(100)
-            .precision(1)
+            .precision(3)
             .build()
             .unwrap();
 
-        for v in 1..101 {
+        for v in 0..101 {
             let _ = h.increment(v);
         }
 
@@ -1194,6 +1145,7 @@ mod tests {
             assert_eq!(b.width(), b.count());
         }
     }
+
     #[test]
     fn test_width_2() {
         let mut h = Histogram::configure()
@@ -1202,21 +1154,24 @@ mod tests {
             .build()
             .unwrap();
 
-        for v in 1..1001 {
+        for v in 0..1001 {
             let _ = h.increment(v);
         }
 
         assert_eq!(h.data.counters.missed_large, 0);
 
         let mut prev_id = 0;
+        let mut prev_value = 0;
         for b in &h {
             println!("Bucket: {:?}", b);
             if b.id() >= 1 {
+                assert_eq!(b.width(), b.value() - prev_value);
                 assert!(b.id() - 1 == prev_id);
                 prev_id = b.id();
+                prev_value = b.value();
             }
             assert!(b.width() != 0, "width should not be 0");
-            assert_eq!(b.width(), b.count());
+
         }
     }
     #[test]
@@ -1234,14 +1189,16 @@ mod tests {
         assert_eq!(h.data.counters.missed_large, 0);
 
         let mut prev_id = 0;
+        let mut prev_value = 0;
         for b in &h {
             println!("Bucket: {:?}", b);
             if b.id() >= 1 {
+                assert_eq!(b.width(), b.value() - prev_value);
                 assert!(b.id() - 1 == prev_id);
                 prev_id = b.id();
+                prev_value = b.value();
             }
             assert!(b.width() != 0, "width should not be 0");
-            assert_eq!(b.width(), b.count());
         }
     }
 }
