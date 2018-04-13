@@ -261,10 +261,7 @@ pub struct Iter<'a> {
 
 impl<'a> Iter<'a> {
     fn new(hist: &'a Histogram) -> Iter<'a> {
-        Iter {
-            hist,
-            index: 0,
-        }
+        Iter { hist, index: 0 }
     }
 }
 
@@ -374,10 +371,7 @@ impl Histogram {
 
         Some(Histogram {
             config,
-            data: Data {
-                data,
-                counters,
-            },
+            data: Data { data, counters },
             properties: Properties {
                 buckets_inner,
                 linear_max,
