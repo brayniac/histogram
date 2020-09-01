@@ -54,11 +54,31 @@
 //! );
 //! ```
 
-#![cfg_attr(feature = "cargo-clippy", deny(missing_docs))]
 #![cfg_attr(feature = "cargo-clippy", deny(warnings))]
 
 use std::fmt;
 use std::mem;
+
+use thiserror::Error;
+
+/// Represents errors that can occur in histogram data lookup or storage.
+#[derive(Debug, Error, PartialEq)]
+pub enum HistogramError {
+    #[error("no data")]
+    NoData,
+    #[error("overflow")]
+    Overflow,
+    #[error("sample value too large")]
+    SampleValueTooLarge,
+    #[error("sample value unknown")]
+    SampleValueUnknown,
+    #[error("large sample value underflow")]
+    SampleValueUnderflow,
+    #[error("underflow")]
+    Underflow,
+    #[error("unknown failure")]
+    UnknownFailure,
+}
 
 /// A configuration struct for building custom `Histogram`s.
 #[derive(Clone, Copy)]
@@ -411,7 +431,7 @@ impl Histogram {
     /// h.increment(1);
     /// assert_eq!(h.get(1).unwrap(), 1);
     /// ```
-    pub fn increment(&mut self, value: u64) -> Result<(), &'static str> {
+    pub fn increment(&mut self, value: u64) -> Result<(), HistogramError> {
         self.increment_by(value, 1_u64)
     }
 
@@ -431,11 +451,11 @@ impl Histogram {
     /// h.increment_by(10, 10);
     /// assert_eq!(h.get(10).unwrap(), 10);
     /// ```
-    pub fn increment_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
+    pub fn increment_by(&mut self, value: u64, count: u64) -> Result<(), HistogramError> {
         self.data.counters.entries_total = self.data.counters.entries_total.saturating_add(count);
         if value > self.config.max_value {
             self.data.counters.missed_large = self.data.counters.missed_large.saturating_add(count);
-            Err("sample value too large")
+            Err(HistogramError::SampleValueTooLarge)
         } else {
             match self.get_index(value) {
                 Some(index) => {
@@ -445,7 +465,7 @@ impl Histogram {
                 None => {
                     self.data.counters.missed_unknown =
                         self.data.counters.missed_unknown.saturating_add(count);
-                    Err("sample unknown error")
+                    Err(HistogramError::SampleValueUnknown)
                 }
             }
         }
@@ -464,7 +484,7 @@ impl Histogram {
     /// h.decrement(1).unwrap();
     /// assert_eq!(h.get(1).unwrap(), 0);
     /// ```
-    pub fn decrement(&mut self, value: u64) -> Result<(), &'static str> {
+    pub fn decrement(&mut self, value: u64) -> Result<(), HistogramError> {
         self.decrement_by(value, 1_u64)
     }
 
@@ -484,15 +504,15 @@ impl Histogram {
     /// assert_eq!(h.get(2).unwrap(), 2);
     /// assert_eq!(h.get(1).unwrap(), 0);
     /// ```
-    pub fn decrement_by(&mut self, value: u64, count: u64) -> Result<(), &'static str> {
+    pub fn decrement_by(&mut self, value: u64, count: u64) -> Result<(), HistogramError> {
         if value > self.config.max_value {
             if let Some(new_missed_large) = self.data.counters.missed_large.checked_sub(count) {
                 self.data.counters.missed_large = new_missed_large;
                 self.data.counters.entries_total =
                     self.data.counters.entries_total.saturating_sub(count);
-                Err("sample value too large")
+                Err(HistogramError::SampleValueTooLarge)
             } else {
-                Err("large sample value underflow")
+                Err(HistogramError::SampleValueUnderflow)
             }
         } else {
             match self.get_index(value) {
@@ -503,13 +523,13 @@ impl Histogram {
                             self.data.counters.entries_total.saturating_sub(count);
                         Ok(())
                     } else {
-                        Err("underflow")
+                        Err(HistogramError::Underflow)
                     }
                 }
                 None => {
                     self.data.counters.missed_unknown =
                         self.data.counters.missed_unknown.saturating_add(count);
-                    Err("sample unknown error")
+                    Err(HistogramError::SampleValueUnknown)
                 }
             }
         }
@@ -554,7 +574,6 @@ impl Histogram {
         let index = l_max + self.properties.buckets_inner * outer + inner + 1;
 
         Some(index as usize)
-
     }
 
     // calculate the nominal value of the given index
@@ -599,13 +618,12 @@ impl Histogram {
     /// assert_eq!(h.percentile(99.0).unwrap(), 991);
     /// assert_eq!(h.percentile(99.9).unwrap(), 999);
     /// ```
-    pub fn percentile(&self, percentile: f64) -> Result<u64, &'static str> {
+    pub fn percentile(&self, percentile: f64) -> Result<u64, HistogramError> {
         if self.entries() < 1 {
-            return Err("no data");
+            return Err(HistogramError::NoData);
         }
 
         if percentile <= 100.0 && percentile >= 0.0 {
-
             let total = self.entries();
 
             let mut need = (total as f64 * (percentile / 100.0_f64)).ceil() as u64;
@@ -634,10 +652,11 @@ impl Histogram {
 
             if have >= need {
                 if index == 0 {
-                    return Err("underflow");
+                    return Err(HistogramError::Underflow);
                 }
-                return Err("overflow");
+                return Err(HistogramError::Overflow);
             }
+
             loop {
                 have += self.data.data[index as usize];
 
@@ -655,7 +674,47 @@ impl Histogram {
                 }
             }
         }
-        Err("unknown failure")
+
+        Err(HistogramError::UnknownFailure)
+    }
+
+    /// return a set of quantiles based on the desired percentiles, provided as a slice
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
+    ///
+    /// for value in 1..1000 {
+    ///     h.increment(value).unwrap();
+    /// }
+    ///
+    /// let quantiles = h.quantile_vec(&vec![50.0, 90.0, 99.0, 99.9]).unwrap();
+    /// assert_eq!(quantiles, vec![501, 901, 991, 999]);
+    /// ```
+    pub fn quantile_vec(&self, pcts: &[f64]) -> Result<Vec<u64>, HistogramError> {
+        pcts.iter().map(|p| Ok(self.percentile(*p)?)).collect()
+    }
+
+    /// return the quartile values of the histogram as a 4-tuple
+    pub fn quartiles(&self) -> Result<(u64, u64, u64, u64), HistogramError> {
+        Ok((
+            self.percentile(25.0)?,
+            self.percentile(50.0)?,
+            self.percentile(75.0)?,
+            self.percentile(100.0)?,
+        ))
+    }
+
+    /// return the quintile values of the histogram as a 5-tuple
+    pub fn quintiles(&self) -> Result<(u64, u64, u64, u64, u64), HistogramError> {
+        Ok((
+            self.percentile(20.0)?,
+            self.percentile(40.0)?,
+            self.percentile(60.0)?,
+            self.percentile(80.0)?,
+            self.percentile(100.0)?,
+        ))
     }
 
     /// convenience function for min
@@ -669,7 +728,7 @@ impl Histogram {
     /// }
     /// assert_eq!(h.minimum().unwrap(), 1);
     /// ```
-    pub fn minimum(&self) -> Result<u64, &'static str> {
+    pub fn minimum(&self) -> Result<u64, HistogramError> {
         self.percentile(0.0_f64)
     }
 
@@ -684,7 +743,7 @@ impl Histogram {
     /// }
     /// assert_eq!(h.maximum().unwrap(), 999);
     /// ```
-    pub fn maximum(&self) -> Result<u64, &'static str> {
+    pub fn maximum(&self) -> Result<u64, HistogramError> {
         self.percentile(100.0_f64)
     }
 
@@ -699,10 +758,9 @@ impl Histogram {
     /// }
     /// assert_eq!(h.mean().unwrap(), 500);
     /// ```
-    pub fn mean(&self) -> Result<u64, &'static str> {
-
+    pub fn mean(&self) -> Result<u64, HistogramError> {
         if self.entries() < 1 {
-            return Err("no data");
+            return Err(HistogramError::NoData);
         }
 
         let total = self.entries();
@@ -727,10 +785,9 @@ impl Histogram {
     /// }
     /// assert_eq!(h.stdvar().unwrap(), 9);
     /// ```
-    pub fn stdvar(&self) -> Result<u64, &'static str> {
-
+    pub fn stdvar(&self) -> Result<u64, HistogramError> {
         if self.entries() < 1 {
-            return Err("no data");
+            return Err(HistogramError::NoData);
         }
 
         let total = self.entries() as f64;
@@ -775,7 +832,6 @@ impl Histogram {
     /// assert_eq!(h.stddev().unwrap(), 1);
     /// ```
     pub fn stddev(&self) -> Option<u64> {
-
         if self.entries() < 1 {
             return None;
         }
@@ -862,7 +918,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_increment_0() {
         let mut h = Histogram::new();
@@ -926,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "large sample value underflow")]
+    #[should_panic(expected = "SampleValueUnderflow")]
     fn test_decrement_4() {
         let mut h = Histogram::new();
         let v = h.config.max_value + 1;
@@ -934,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "sample value too large")]
+    #[should_panic(expected = "SampleValueTooLarge")]
     fn test_decrement_5() {
         let mut h = Histogram::new();
         let v = h.config.max_value + 1;
@@ -1088,6 +1143,73 @@ mod tests {
     }
 
     #[test]
+    fn test_quantile_vec() {
+        let mut h = Histogram::configure()
+            .max_value(1_000)
+            .precision(4)
+            .build()
+            .unwrap();
+
+        for i in 100..200 {
+            h.increment(i).ok().expect("error");
+        }
+
+        let pct = vec![0.0, 10.0, 25.0, 50.0, 75.0, 90.0, 95.0, 100.0];
+        let percentiles = h.quantile_vec(&pct).unwrap();
+
+        assert_eq!(percentiles.len(), 8);
+        assert_eq!(percentiles[0], 100);
+        assert_eq!(percentiles[1], 109);
+        assert_eq!(percentiles[2], 124);
+        assert_eq!(percentiles[3], 150);
+        assert_eq!(percentiles[4], 175);
+        assert_eq!(percentiles[5], 190);
+        assert_eq!(percentiles[6], 195);
+        assert_eq!(percentiles[7], 199);
+    }
+
+    #[test]
+    fn test_quartiles() {
+        let mut h = Histogram::configure()
+            .max_value(1_000)
+            .precision(4)
+            .build()
+            .unwrap();
+
+        for i in 100..200 {
+            h.increment(i).ok().expect("error");
+        }
+
+        let quartiles = h.quartiles().unwrap();
+        assert_eq!(quartiles.0, 124);
+        assert_eq!(quartiles.1, 150);
+        assert_eq!(quartiles.2, 175);
+        assert_eq!(quartiles.3, 199);
+    }
+
+    #[test]
+    fn test_quintiles() {
+        let mut h = Histogram::configure()
+            .max_value(1_000)
+            .precision(4)
+            .build()
+            .unwrap();
+
+        for i in 100..200 {
+            h.increment(i).ok().expect("error");
+        }
+
+        let qvec = h.quantile_vec(&vec![20.0, 40.0, 60.0, 80.0, 100.0])
+            .unwrap();
+        let quintiles = h.quintiles().unwrap();
+        assert_eq!(quintiles.0, qvec[0]);
+        assert_eq!(quintiles.1, qvec[1]);
+        assert_eq!(quintiles.2, qvec[2]);
+        assert_eq!(quintiles.3, qvec[3]);
+        assert_eq!(quintiles.4, qvec[4]);
+    }
+
+    #[test]
     fn test_percentile_bad() {
         let mut h = Histogram::configure()
             .max_value(1_000)
@@ -1162,7 +1284,6 @@ mod tests {
                 prev_value = b.value();
             }
             assert!(b.width() != 0, "width should not be 0");
-
         }
     }
     #[test]

@@ -16,3 +16,8 @@ readme = "README.md"
 keywords = [ "histogram", "percentile", "statistics", "stats" ]
 
 categories = [ "data-structures" ]
+
+edition = "2018"
+
+[dependencies]
+thiserror = "^1"
