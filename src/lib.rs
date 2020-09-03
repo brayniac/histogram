@@ -64,6 +64,8 @@ use thiserror::Error;
 /// Represents errors that can occur in histogram data lookup or storage.
 #[derive(Debug, Error, PartialEq)]
 pub enum HistogramError {
+    #[error("invalid percentile value")]
+    InvalidPercentileValue,
     #[error("no data")]
     NoData,
     #[error("overflow")]
@@ -550,7 +552,7 @@ impl Histogram {
         }
     }
 
-    // calculate the index for a given value
+    /// calculate the index for a given value
     fn get_index(&self, value: u64) -> Option<usize> {
         if value <= (self.properties.linear_max + 2_u64.pow(self.config.precision)) {
             return Some(value as usize);
@@ -576,7 +578,7 @@ impl Histogram {
         Some(index as usize)
     }
 
-    // calculate the nominal value of the given index
+    /// calculate the nominal value of the given index
     fn index_value(&self, index: usize) -> u64 {
         // in this case, the index is linear
         let index = index as u32;
@@ -619,59 +621,59 @@ impl Histogram {
     /// assert_eq!(h.percentile(99.9).unwrap(), 999);
     /// ```
     pub fn percentile(&self, percentile: f64) -> Result<u64, HistogramError> {
-        if self.entries() < 1 {
-            return Err(HistogramError::NoData);
+        if percentile < 0.0 || percentile > 100.0 {
+            return Err(HistogramError::InvalidPercentileValue);
         }
 
-        if percentile <= 100.0 && percentile >= 0.0 {
-            let total = self.entries();
+        let total = self.try_entries()?;
 
-            let mut need = (total as f64 * (percentile / 100.0_f64)).ceil() as u64;
+        let mut need = (total as f64 * (percentile / 100.0_f64)).ceil() as u64;
 
-            if need > total {
-                need = total;
-            }
+        if need > total {
+            need = total;
+        }
 
+        need = total - need;
+
+        let mut index: isize = (self.buckets_total() - 1) as isize;
+        let mut step: isize = -1 as isize;
+
+        let mut have = if percentile < 50.0 {
+            index = 0 as isize;
+            step = 1 as isize;
             need = total - need;
+            0
+        } else {
+            self.data.counters.missed_large
+        };
 
-            let mut index: isize = (self.buckets_total() - 1) as isize;
-            let mut step: isize = -1 as isize;
+        if need == 0 {
+            need = 1;
+        }
 
-            let mut have = if percentile < 50.0 {
-                index = 0 as isize;
-                step = 1 as isize;
-                need = total - need;
-                0
+        if have >= need {
+            if index == 0 {
+                return Err(HistogramError::Underflow);
             } else {
-                self.data.counters.missed_large
-            };
-
-            if need == 0 {
-                need = 1;
-            }
-
-            if have >= need {
-                if index == 0 {
-                    return Err(HistogramError::Underflow);
-                }
                 return Err(HistogramError::Overflow);
             }
+        }
 
-            loop {
-                have += self.data.data[index as usize];
+        loop {
+            have += self.data.data[index as usize];
 
-                if have >= need {
-                    return Ok(self.index_value(index as usize) as u64);
-                }
+            if have >= need {
+                return Ok(self.index_value(index as usize) as u64);
+            }
 
-                index += step;
+            index += step;
 
-                if index >= self.buckets_total() as isize {
-                    break;
-                }
-                if index < 0 {
-                    break;
-                }
+            if index >= self.buckets_total() as isize {
+                break;
+            }
+
+            if index < 0 {
+                break;
             }
         }
 
@@ -697,6 +699,19 @@ impl Histogram {
     }
 
     /// return the quartile values of the histogram as a 4-tuple
+    ///
+    /// # Example
+    /// ```
+    /// # use histogram::Histogram;
+    /// let mut h = Histogram::new();
+    ///
+    /// for value in 1..1000 {
+    ///     h.increment(value).unwrap();
+    /// }
+    ///
+    /// let quantiles = h.quantile_vec(&vec![50.0, 90.0, 99.0, 99.9]).unwrap();
+    /// assert_eq!(quantiles, vec![501, 901, 991, 999]);
+    /// ```
     pub fn quartiles(&self) -> Result<(u64, u64, u64, u64), HistogramError> {
         Ok((
             self.percentile(25.0)?,
@@ -747,7 +762,7 @@ impl Histogram {
         self.percentile(100.0_f64)
     }
 
-    /// arithmetic mean approximation across the histogram
+    /// arithmetic mean approximation across the histogram, returning an integer
     ///
     /// # Example
     /// ```
@@ -759,11 +774,12 @@ impl Histogram {
     /// assert_eq!(h.mean().unwrap(), 500);
     /// ```
     pub fn mean(&self) -> Result<u64, HistogramError> {
-        if self.entries() < 1 {
-            return Err(HistogramError::NoData);
-        }
+        self.mean_f64().map(|n| n.ceil() as u64)
+    }
 
-        let total = self.entries();
+    /// arithmetic mean approximation across the histogram, returning a float
+    pub fn mean_f64(&self) -> Result<f64, HistogramError> {
+        let total = self.try_entries()?;
 
         let mut mean = 0.0_f64;
 
@@ -771,10 +787,11 @@ impl Histogram {
             mean += (self.index_value(index) as f64 * self.data.data[index] as f64) as f64 /
                 total as f64;
         }
-        Ok(mean.ceil() as u64)
+
+        Ok(mean)
     }
 
-    /// standard variance approximation across the histogram
+    /// standard variance approximation across the histogram, returning an integer
     ///
     /// # Example
     /// ```
@@ -786,13 +803,14 @@ impl Histogram {
     /// assert_eq!(h.stdvar().unwrap(), 9);
     /// ```
     pub fn stdvar(&self) -> Result<u64, HistogramError> {
-        if self.entries() < 1 {
-            return Err(HistogramError::NoData);
-        }
+        self.stdvar_f64().map(|n| n.ceil() as u64)
+    }
 
-        let total = self.entries() as f64;
+    /// standard variance approximation across the histogram, returning a float
+    pub fn stdvar_f64(&self) -> Result<f64, HistogramError> {
+        let total = self.try_entries()? as f64;
 
-        let m = self.mean().unwrap() as f64;
+        let m = self.mean_f64()?;
 
         let mut stdvar = 0.0_f64;
 
@@ -802,12 +820,10 @@ impl Histogram {
             stdvar += (c * v * v) - (2_f64 * c * m * v) + (c * m * m);
         }
 
-        stdvar /= total;
-
-        Ok(stdvar.ceil() as u64)
+        Ok(stdvar / total)
     }
 
-    /// standard deviation approximation across the histogram
+    /// standard deviation approximation across the histogram, returning an integer
     ///
     /// # Example
     /// ```
@@ -832,15 +848,12 @@ impl Histogram {
     /// assert_eq!(h.stddev().unwrap(), 1);
     /// ```
     pub fn stddev(&self) -> Option<u64> {
-        if self.entries() < 1 {
-            return None;
-        }
+        self.stdvar_f64().map(|n| n.sqrt().ceil() as u64).ok()
+    }
 
-        let stdvar = self.stdvar().unwrap() as f64;
-
-        let stddev = stdvar.sqrt();
-
-        Some(stddev.ceil() as u64)
+    /// standard deviation approximation accross the histogram, returning a float
+    pub fn stddev_f64(&self) -> Option<f64> {
+        self.stdvar_f64().map(f64::sqrt).ok()
     }
 
     /// merge one Histogram into another Histogram
@@ -885,6 +898,14 @@ impl Histogram {
     /// ```
     pub fn entries(&self) -> u64 {
         self.data.counters.entries_total
+    }
+
+    /// return the number of entries in the Histogram or a `NoData` error
+    fn try_entries(&self) -> Result<u64, HistogramError> {
+        match self.entries() {
+            0 => Err(HistogramError::NoData),
+            n => Ok(n),
+        }
     }
 
     /// return the number of buckets in the Histogram
@@ -1286,6 +1307,7 @@ mod tests {
             assert!(b.width() != 0, "width should not be 0");
         }
     }
+
     #[test]
     fn test_width_3() {
         let mut h = Histogram::configure()
@@ -1312,5 +1334,35 @@ mod tests {
             }
             assert!(b.width() != 0, "width should not be 0");
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidPercentileValue")]
+    fn test_invalid_percentile_1() {
+        let mut h = Histogram::new();
+        h.increment(1).unwrap();
+        h.percentile(-1.0).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "InvalidPercentileValue")]
+    fn test_invalid_percentile_2() {
+        let mut h = Histogram::new();
+        h.increment(1).unwrap();
+        h.percentile(101.0).unwrap();
+    }
+
+    #[test]
+    fn test_valid_percentile_1() {
+        let mut h = Histogram::new();
+        h.increment(1).unwrap();
+        assert_eq!(h.percentile(100.0).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_valid_percentile_2() {
+        let mut h = Histogram::new();
+        h.increment(1).unwrap();
+        assert_eq!(h.percentile(0.0).unwrap(), 1);
     }
 }
