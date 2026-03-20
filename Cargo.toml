@@ -1,0 +1,30 @@
+[package]
+name = "histogram"
+version = "1.0.0-alpha.0"
+edition = "2024"
+authors = ["Brian Martin <brian@iop.systems>"]
+license = "MIT OR Apache-2.0"
+description = "A collection of histogram data structures"
+homepage = "https://github.com/iopsystems/histogram"
+repository = "https://github.com/iopsystems/histogram"
+keywords = ["histogram", "metrics", "statistics", "percentile", "hdrhistogram"]
+categories = ["data-structures", "algorithms"]
+readme = "README.md"
+rust-version = "1.85"
+
+[dependencies]
+schemars = { version = "1.2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+thiserror = "2.0"
+
+[dev-dependencies]
+criterion = "0.8"
+rand = "0.10"
+
+[features]
+schemars = ["dep:schemars", "serde"]
+serde = ["dep:serde"]
+
+[[bench]]
+name = "histogram"
+harness = false
